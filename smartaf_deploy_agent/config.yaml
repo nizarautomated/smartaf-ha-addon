@@ -1,0 +1,39 @@
+name: SmartAF Node-RED Deploy Agent
+version: "0.2.0"
+slug: smartaf_nodered_deploy
+description: Applies validated GitHub deployment patches to Node-RED with backup, restart, status reporting, and rollback.
+url: https://github.com/nizarautomated/smartaf-ha-addon
+startup: services
+boot: auto
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armv7
+hassio_api: true
+hassio_role: manager
+map:
+  - type: all_addon_configs
+    read_only: false
+options:
+  github_repository: nizarautomated/home-assistant-node-red
+  github_branch: main
+  github_token: ""
+  deployment_path: deployments/pending.json
+  status_directory: deployments/status
+  nodered_addon_slug: a0d7b954_nodered
+  flows_path: /addon_configs/a0d7b954_nodered/flows.json
+  poll_interval_seconds: 60
+  restart_timeout_seconds: 120
+  dry_run: false
+schema:
+  github_repository: str
+  github_branch: str
+  github_token: password
+  deployment_path: str
+  status_directory: str
+  nodered_addon_slug: str
+  flows_path: str
+  poll_interval_seconds: int(15,3600)
+  restart_timeout_seconds: int(30,600)
+  dry_run: bool
