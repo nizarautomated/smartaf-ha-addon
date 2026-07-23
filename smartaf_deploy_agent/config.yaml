@@ -1,5 +1,5 @@
 name: SmartAF Node-RED Deploy Agent
-version: "0.2.0"
+version: "0.3.0"
 slug: smartaf_nodered_deploy
 description: Applies validated GitHub deployment patches to Node-RED with backup, restart, status reporting, and rollback.
 url: https://github.com/nizarautomated/smartaf-ha-addon
@@ -12,6 +12,7 @@ arch:
   - armv7
 hassio_api: true
 hassio_role: manager
+homeassistant_api: true
 map:
   - type: all_addon_configs
     read_only: false
