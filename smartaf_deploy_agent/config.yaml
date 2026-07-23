@@ -27,6 +27,10 @@ options:
   poll_interval_seconds: 60
   restart_timeout_seconds: 120
   dry_run: false
+  app_repository: nizarautomated/smartaf-ha-addon
+  app_branch: main
+  app_config_path: smartaf_deploy_agent/config.yaml
+  app_update_check_interval_seconds: 300
 schema:
   github_repository: str
   github_branch: str
@@ -38,3 +42,7 @@ schema:
   poll_interval_seconds: int(15,3600)
   restart_timeout_seconds: int(30,600)
   dry_run: bool
+  app_repository: str
+  app_branch: str
+  app_config_path: str
+  app_update_check_interval_seconds: int(60,3600)
