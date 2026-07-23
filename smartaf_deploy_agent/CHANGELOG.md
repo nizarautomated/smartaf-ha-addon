@@ -7,6 +7,9 @@
 - Capture only initial states and filtered state transitions for those entities.
 - Publish sanitized reports under `diagnostics/reports/` without attributes, context IDs, tokens, service calls, or unrelated entities.
 - Process each `diagnostic_id` only once.
+- Verify that Supervisor actually indexed each published app version before marking the refresh complete.
+- Retry store reloads and use the official repository repair endpoint once when metadata remains stale.
+- Refresh Home Assistant update metadata only after the store reports the expected version; updates remain manual.
 
 ## 0.3.2
 
