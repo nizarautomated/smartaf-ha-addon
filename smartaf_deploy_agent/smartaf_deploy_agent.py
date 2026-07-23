@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from datetime import datetime, timezone
@@ -299,6 +300,60 @@ def supervisor_request(
     )
 
 
+
+def fetch_published_app_version(config: dict[str, Any]) -> str:
+    repository = config.get(
+        "app_repository",
+        "nizarautomated/smartaf-ha-addon",
+    )
+    branch = config.get("app_branch", "main")
+    path = config.get(
+        "app_config_path",
+        "smartaf_deploy_agent/config.yaml",
+    )
+    url = (
+        f"https://api.github.com/repos/{repository}/contents/{path}"
+        f"?ref={branch}"
+    )
+    response = http_json(url)
+    content = base64.b64decode(response["content"]).decode("utf-8")
+    match = re.search(
+        r"(?m)^version:\s*[\"']?([^\"'\s#]+)",
+        content,
+    )
+    if not match:
+        raise RuntimeError("published app version not found")
+    return match.group(1)
+
+
+def installed_app_version() -> str:
+    response = supervisor_request("/addons/self/info")
+    data = response.get("data", response)
+    version = data.get("version")
+    if not version:
+        raise RuntimeError("installed app version not found")
+    return str(version)
+
+
+def refresh_store_for_app_update(
+    config: dict[str, Any],
+    last_refreshed_version: str | None,
+) -> str | None:
+    installed = installed_app_version()
+    published = fetch_published_app_version(config)
+
+    if published == installed or published == last_refreshed_version:
+        return last_refreshed_version
+
+    supervisor_request("/store/reload", method="POST")
+    LOG.info(
+        "App store refreshed; installed_version=%s published_version=%s",
+        installed,
+        published,
+    )
+    return published
+
+
 def homeassistant_core_config() -> dict[str, Any]:
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -573,6 +628,12 @@ def main() -> None:
     validate_options(config)
 
     interval = max(15, int(config.get("poll_interval_seconds", 60)))
+    update_check_interval = max(
+        60,
+        int(config.get("app_update_check_interval_seconds", 300)),
+    )
+    next_update_check = 0.0
+    last_refreshed_version: str | None = None
     LOG.info(
         "SmartAF deploy agent started; repo=%s branch=%s",
         config["github_repository"],
@@ -607,6 +668,19 @@ def main() -> None:
                 LOG.error("GitHub HTTP error: %s", exc)
         except Exception as exc:
             LOG.exception("poll failed: %s", exc)
+
+        if time.monotonic() >= next_update_check:
+            try:
+                last_refreshed_version = refresh_store_for_app_update(
+                    config,
+                    last_refreshed_version,
+                )
+            except Exception as exc:
+                LOG.warning("app update metadata check failed: %s", exc)
+            finally:
+                next_update_check = (
+                    time.monotonic() + update_check_interval
+                )
 
         time.sleep(interval)
 
