@@ -297,6 +297,16 @@ def supervisor_request(
     )
 
 
+def homeassistant_core_config() -> dict[str, Any]:
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise RuntimeError("SUPERVISOR_TOKEN missing")
+    return http_json(
+        "http://supervisor/core/api/config",
+        token=token,
+    )
+
+
 def restart_nodered(config: dict[str, Any]) -> None:
     addon_slug = config["nodered_addon_slug"]
     supervisor_request(f"/addons/{addon_slug}/restart", method="POST")
@@ -517,6 +527,15 @@ def main() -> None:
         config["github_repository"],
         config["github_branch"],
     )
+
+    try:
+        core_config = homeassistant_core_config()
+        LOG.info(
+            "Home Assistant Core API reachable; version=%s",
+            core_config.get("version", "unknown"),
+        )
+    except Exception as exc:
+        LOG.error("Home Assistant Core API check failed: %s", exc)
 
     while True:
         try:
