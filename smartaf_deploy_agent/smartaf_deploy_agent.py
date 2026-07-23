@@ -30,6 +30,21 @@ RESULT_DIR = Path("/data/results")
 DIAGNOSTIC_STATE_PATH = Path("/data/diagnostic_state.json")
 DIAGNOSTIC_RESULT_DIR = Path("/data/diagnostics")
 
+INTEGRATION_SYNC_STATE_PATH = Path("/data/integration_sync_state.json")
+INTEGRATION_TARGET_ROOT = Path("/homeassistant/custom_components/smartaf")
+INTEGRATION_SOURCE_DIRECTORY = "custom_components/smartaf"
+INTEGRATION_FILES = (
+    "__init__.py",
+    "client.py",
+    "config_flow.py",
+    "const.py",
+    "llm.py",
+    "manifest.json",
+    "strings.json",
+    "translations/nl.json",
+    "validation.py",
+)
+
 DIAGNOSTIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ENTITY_ID_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 
@@ -904,6 +919,80 @@ def process_diagnostic_request(
         report.get("event_count", 0),
     )
 
+
+def fetch_repository_file(
+    config: dict[str, Any],
+    relative_path: str,
+) -> bytes:
+    """Fetch one allowlisted integration file from the private repository."""
+    branch = config["github_branch"]
+    token = config["github_token"]
+    url = (
+        f"{github_contents_url(config, relative_path)}"
+        f"?ref={parse.quote(branch, safe='')}"
+    )
+    response = http_json(url, token)
+    encoded = response.get("content")
+    if not isinstance(encoded, str):
+        raise RuntimeError(f"repository file has no content: {relative_path}")
+    return base64.b64decode("".join(encoded.split()), validate=True)
+
+
+def sync_smartaf_custom_integration(config: dict[str, Any]) -> bool:
+    """Atomically sync only the fixed SmartAF custom integration allowlist."""
+    files: dict[str, bytes] = {}
+    hashes: dict[str, str] = {}
+
+    for relative_name in INTEGRATION_FILES:
+        repository_path = (
+            f"{INTEGRATION_SOURCE_DIRECTORY}/{relative_name}"
+        )
+        content = fetch_repository_file(config, repository_path)
+        files[relative_name] = content
+        hashes[relative_name] = raw_sha256(content)
+
+    manifest_hash = canonical_sha256(hashes)
+    previous_state = (
+        read_json(INTEGRATION_SYNC_STATE_PATH)
+        if INTEGRATION_SYNC_STATE_PATH.exists()
+        else {}
+    )
+    targets_exist = all(
+        (INTEGRATION_TARGET_ROOT / relative_name).is_file()
+        for relative_name in INTEGRATION_FILES
+    )
+    if (
+        previous_state.get("manifest_sha256") == manifest_hash
+        and targets_exist
+    ):
+        return False
+
+    for relative_name, content in files.items():
+        target = INTEGRATION_TARGET_ROOT / relative_name
+        if not target.resolve().is_relative_to(
+            INTEGRATION_TARGET_ROOT.resolve()
+        ):
+            raise RuntimeError("integration target escaped fixed directory")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(target.suffix + ".smartaf.tmp")
+        with temporary.open("wb") as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, target)
+
+    write_json_atomic(
+        INTEGRATION_SYNC_STATE_PATH,
+        {
+            "manifest_sha256": manifest_hash,
+            "synced_at": utc_now(),
+            "target": str(INTEGRATION_TARGET_ROOT),
+            "file_count": len(files),
+        },
+    )
+    return True
+
+
 def restart_nodered(config: dict[str, Any]) -> None:
     addon_slug = config["nodered_addon_slug"]
     supervisor_request(f"/addons/{addon_slug}/restart", method="POST")
@@ -1150,6 +1239,23 @@ def main() -> None:
         )
     except Exception as exc:
         LOG.error("Home Assistant Core WebSocket check failed: %s", exc)
+
+
+    try:
+        if sync_smartaf_custom_integration(config):
+            LOG.info(
+                "SmartAF custom integration synced; target=%s files=%s; "
+                "Home Assistant Core restart required",
+                INTEGRATION_TARGET_ROOT,
+                len(INTEGRATION_FILES),
+            )
+        else:
+            LOG.info(
+                "SmartAF custom integration already current; target=%s",
+                INTEGRATION_TARGET_ROOT,
+            )
+    except Exception as exc:
+        LOG.exception("SmartAF custom integration sync failed: %s", exc)
 
     while True:
         try:
