@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Ignore attribute-only Home Assistant updates where the old and new entity state are equal.
+- Keep diagnostic event reports limited to actual state transitions.
+
 ## 0.4.0
 
 - Add bounded read-only entity diagnostics requested through `diagnostics/request.json`.
