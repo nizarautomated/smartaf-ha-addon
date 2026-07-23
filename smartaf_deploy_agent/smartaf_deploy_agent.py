@@ -775,10 +775,15 @@ def run_bounded_entity_diagnostic(
                 if entity_id not in monitored_entity_ids:
                     continue
 
+                old_state = from_state.get("state")
+                new_state = to_state.get("state")
+                if old_state == new_state:
+                    continue
+
                 event = {
                     "entity_id": entity_id,
-                    "old_state": from_state.get("state"),
-                    "new_state": to_state.get("state"),
+                    "old_state": old_state,
+                    "new_state": new_state,
                     "occurred_at": (
                         to_state.get("last_changed")
                         or to_state.get("last_updated")
