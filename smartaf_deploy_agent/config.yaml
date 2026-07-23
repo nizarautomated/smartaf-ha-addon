@@ -1,7 +1,7 @@
 name: SmartAF Node-RED Deploy Agent
 version: "0.3.2"
 slug: smartaf_nodered_deploy
-description: Applies validated GitHub deployment patches to Node-RED with backup, restart, status reporting, and rollback.
+description: Applies validated Node-RED patches and runs bounded read-only Home Assistant diagnostics through GitHub.
 url: https://github.com/nizarautomated/smartaf-ha-addon
 startup: services
 boot: auto
@@ -31,6 +31,10 @@ options:
   app_branch: main
   app_config_path: smartaf_deploy_agent/config.yaml
   app_update_check_interval_seconds: 300
+  diagnostic_request_path: diagnostics/request.json
+  diagnostic_report_directory: diagnostics/reports
+  diagnostic_max_entities: 10
+  diagnostic_max_duration_seconds: 120
 schema:
   github_repository: str
   github_branch: str
@@ -46,3 +50,7 @@ schema:
   app_branch: str
   app_config_path: str
   app_update_check_interval_seconds: int(60,3600)
+  diagnostic_request_path: str
+  diagnostic_report_directory: str
+  diagnostic_max_entities: int(1,10)
+  diagnostic_max_duration_seconds: int(10,120)
