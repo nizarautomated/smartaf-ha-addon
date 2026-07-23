@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Validate the internal Home Assistant WebSocket proxy at startup.
+- Authenticate with the existing Supervisor token, run one read-only `get_config` command, and close immediately.
+- Log only connection metadata and the Home Assistant version; do not log entity data or tokens.
+
 ## 0.3.1
 
 - Test read-only Home Assistant Core REST access at startup and log only the Core version.
