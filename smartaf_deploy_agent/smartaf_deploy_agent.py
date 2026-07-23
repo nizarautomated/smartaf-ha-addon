@@ -920,16 +920,31 @@ def process_diagnostic_request(
     )
 
 
+def fetch_repository_commit_sha(config: dict[str, Any]) -> str:
+    """Resolve the configured branch once to prevent a mixed-file sync."""
+    repository = config["github_repository"]
+    branch = parse.quote(config["github_branch"], safe="")
+    token = config["github_token"]
+    response = http_json(
+        f"https://api.github.com/repos/{repository}/commits/{branch}",
+        token,
+    )
+    commit_sha = response.get("sha")
+    if not isinstance(commit_sha, str) or not commit_sha:
+        raise RuntimeError("repository commit SHA not found")
+    return commit_sha
+
+
 def fetch_repository_file(
     config: dict[str, Any],
     relative_path: str,
+    source_ref: str,
 ) -> bytes:
-    """Fetch one allowlisted integration file from the private repository."""
-    branch = config["github_branch"]
+    """Fetch one allowlisted integration file from one pinned commit."""
     token = config["github_token"]
     url = (
         f"{github_contents_url(config, relative_path)}"
-        f"?ref={parse.quote(branch, safe='')}"
+        f"?ref={parse.quote(source_ref, safe='')}"
     )
     response = http_json(url, token)
     encoded = response.get("content")
@@ -942,12 +957,17 @@ def sync_smartaf_custom_integration(config: dict[str, Any]) -> bool:
     """Atomically sync only the fixed SmartAF custom integration allowlist."""
     files: dict[str, bytes] = {}
     hashes: dict[str, str] = {}
+    source_ref = fetch_repository_commit_sha(config)
 
     for relative_name in INTEGRATION_FILES:
         repository_path = (
             f"{INTEGRATION_SOURCE_DIRECTORY}/{relative_name}"
         )
-        content = fetch_repository_file(config, repository_path)
+        content = fetch_repository_file(
+            config,
+            repository_path,
+            source_ref,
+        )
         files[relative_name] = content
         hashes[relative_name] = raw_sha256(content)
 
@@ -985,6 +1005,7 @@ def sync_smartaf_custom_integration(config: dict[str, Any]) -> bool:
         INTEGRATION_SYNC_STATE_PATH,
         {
             "manifest_sha256": manifest_hash,
+            "source_commit_sha": source_ref,
             "synced_at": utc_now(),
             "target": str(INTEGRATION_TARGET_ROOT),
             "file_count": len(files),
