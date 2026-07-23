@@ -16,6 +16,8 @@ homeassistant_api: true
 map:
   - type: all_addon_configs
     read_only: false
+  - type: homeassistant_config
+    read_only: false
 options:
   github_repository: nizarautomated/home-assistant-node-red
   github_branch: main
