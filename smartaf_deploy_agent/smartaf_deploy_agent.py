@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+from websocket import create_connection
+
 LOG = logging.getLogger("smartaf")
 logging.basicConfig(
     level=logging.INFO,
@@ -307,6 +309,55 @@ def homeassistant_core_config() -> dict[str, Any]:
     )
 
 
+def homeassistant_websocket_check() -> str:
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise RuntimeError("SUPERVISOR_TOKEN missing")
+
+    websocket = create_connection(
+        "ws://supervisor/core/websocket",
+        timeout=10,
+        http_no_proxy=["supervisor"],
+    )
+    try:
+        challenge = json.loads(websocket.recv())
+        if challenge.get("type") != "auth_required":
+            raise RuntimeError("WebSocket did not request authentication")
+
+        websocket.send(
+            json.dumps(
+                {
+                    "type": "auth",
+                    "access_token": token,
+                }
+            )
+        )
+        authentication = json.loads(websocket.recv())
+        if authentication.get("type") != "auth_ok":
+            raise RuntimeError(
+                "WebSocket authentication failed: "
+                f"{authentication.get('type', 'unknown')}"
+            )
+
+        websocket.send(json.dumps({"id": 1, "type": "get_config"}))
+        response = json.loads(websocket.recv())
+        if (
+            response.get("id") != 1
+            or response.get("type") != "result"
+            or response.get("success") is not True
+            or not isinstance(response.get("result"), dict)
+        ):
+            raise RuntimeError("WebSocket get_config check failed")
+
+        return str(
+            authentication.get("ha_version")
+            or response["result"].get("version")
+            or "unknown"
+        )
+    finally:
+        websocket.close()
+
+
 def restart_nodered(config: dict[str, Any]) -> None:
     addon_slug = config["nodered_addon_slug"]
     supervisor_request(f"/addons/{addon_slug}/restart", method="POST")
@@ -536,6 +587,16 @@ def main() -> None:
         )
     except Exception as exc:
         LOG.error("Home Assistant Core API check failed: %s", exc)
+
+    try:
+        websocket_version = homeassistant_websocket_check()
+        LOG.info(
+            "Home Assistant Core WebSocket reachable; authenticated=yes; "
+            "command=get_config; version=%s",
+            websocket_version,
+        )
+    except Exception as exc:
+        LOG.error("Home Assistant Core WebSocket check failed: %s", exc)
 
     while True:
         try:
