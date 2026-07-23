@@ -1,8 +1,8 @@
+# Changelog
+
 ## 0.3.1
 
 - Test read-only Home Assistant Core REST access at startup and log only the Core version.
-
-# Changelog
 
 ## 0.3.0
 
