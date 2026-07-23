@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Add bounded read-only entity diagnostics requested through `diagnostics/request.json`.
+- Allow 1–10 explicit entity IDs and a 10–120 second measurement window.
+- Capture only initial states and filtered state transitions for those entities.
+- Publish sanitized reports under `diagnostics/reports/` without attributes, context IDs, tokens, service calls, or unrelated entities.
+- Process each `diagnostic_id` only once.
+
 ## 0.3.2
 
 - Validate the internal Home Assistant WebSocket proxy at startup.
