@@ -1,7 +1,7 @@
 name: SmartAF Node-RED Deploy Agent
-version: "0.4.1"
+version: "0.5.0"
 slug: smartaf_nodered_deploy
-description: Applies validated Node-RED patches and runs bounded read-only Home Assistant diagnostics through GitHub.
+description: Applies validated Node-RED patches, runs bounded diagnostics, and syncs the SmartAF custom integration.
 url: https://github.com/nizarautomated/smartaf-ha-addon
 startup: services
 boot: auto
