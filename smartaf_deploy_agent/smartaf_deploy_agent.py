@@ -331,32 +331,155 @@ def fetch_published_app_version(config: dict[str, Any]) -> str:
     return match.group(1)
 
 
-def installed_app_version() -> str:
-    response = supervisor_request("/addons/self/info")
-    data = response.get("data", response)
-    version = data.get("version")
+def unwrap_supervisor_response(response: Any) -> Any:
+    if isinstance(response, dict) and "data" in response:
+        return response["data"]
+    return response
+
+
+def installed_app_info() -> tuple[str, str]:
+    response = unwrap_supervisor_response(
+        supervisor_request("/addons/self/info")
+    )
+    if not isinstance(response, dict):
+        raise RuntimeError("installed app info is invalid")
+
+    version = response.get("version")
+    slug = response.get("slug")
     if not version:
         raise RuntimeError("installed app version not found")
-    return str(version)
+    if not slug:
+        raise RuntimeError("installed app slug not found")
+    return str(version), str(slug)
+
+
+def store_app_latest_version(addon_slug: str) -> str | None:
+    encoded_slug = parse.quote(addon_slug, safe="")
+    response = unwrap_supervisor_response(
+        supervisor_request(f"/store/addons/{encoded_slug}")
+    )
+    if not isinstance(response, dict):
+        return None
+    version = response.get("version_latest") or response.get("version")
+    return str(version) if version else None
+
+
+def wait_for_store_version(
+    addon_slug: str,
+    published_version: str,
+    attempts: int = 6,
+    delay_seconds: int = 5,
+) -> bool:
+    for attempt in range(attempts):
+        if store_app_latest_version(addon_slug) == published_version:
+            return True
+        if attempt + 1 < attempts:
+            time.sleep(delay_seconds)
+    return False
+
+
+def find_app_repository_slug(config: dict[str, Any]) -> str:
+    repository = config.get(
+        "app_repository",
+        "nizarautomated/smartaf-ha-addon",
+    )
+    expected_sources = {
+        f"https://github.com/{repository}".rstrip("/"),
+        f"https://github.com/{repository}.git".rstrip("/"),
+    }
+    response = unwrap_supervisor_response(
+        supervisor_request("/store/repositories")
+    )
+    repositories = (
+        response
+        if isinstance(response, list)
+        else response.get("repositories", [])
+        if isinstance(response, dict)
+        else []
+    )
+
+    for store_repository in repositories:
+        if not isinstance(store_repository, dict):
+            continue
+        source = str(
+            store_repository.get("source")
+            or store_repository.get("url")
+            or ""
+        ).rstrip("/")
+        if source in expected_sources:
+            slug = store_repository.get("slug")
+            if slug:
+                return str(slug)
+
+    raise RuntimeError("SmartAF app repository slug not found")
 
 
 def refresh_store_for_app_update(
     config: dict[str, Any],
-    last_refreshed_version: str | None,
-) -> str | None:
-    installed = installed_app_version()
+    confirmed_version: str | None,
+    repaired_version: str | None,
+) -> tuple[str | None, str | None]:
+    installed, addon_slug = installed_app_info()
     published = fetch_published_app_version(config)
 
-    if published == installed or published == last_refreshed_version:
-        return last_refreshed_version
+    if published == installed:
+        return published, repaired_version
+    if published == confirmed_version:
+        return confirmed_version, repaired_version
+
+    if wait_for_store_version(
+        addon_slug,
+        published,
+        attempts=1,
+        delay_seconds=0,
+    ):
+        supervisor_request("/reload_updates", method="POST")
+        LOG.info(
+            "App update metadata confirmed; installed_version=%s "
+            "published_version=%s",
+            installed,
+            published,
+        )
+        return published, repaired_version
 
     supervisor_request("/store/reload", method="POST")
-    LOG.info(
-        "App store refreshed; installed_version=%s published_version=%s",
+    if wait_for_store_version(addon_slug, published):
+        supervisor_request("/reload_updates", method="POST")
+        LOG.info(
+            "App store refresh verified; installed_version=%s "
+            "published_version=%s",
+            installed,
+            published,
+        )
+        return published, repaired_version
+
+    if repaired_version != published:
+        repository_slug = find_app_repository_slug(config)
+        encoded_repository_slug = parse.quote(repository_slug, safe="")
+        supervisor_request(
+            f"/store/repositories/{encoded_repository_slug}/repair",
+            method="POST",
+        )
+        repaired_version = published
+        supervisor_request("/store/reload", method="POST")
+        if wait_for_store_version(addon_slug, published):
+            supervisor_request("/reload_updates", method="POST")
+            LOG.info(
+                "App repository repaired and update metadata verified; "
+                "installed_version=%s published_version=%s",
+                installed,
+                published,
+            )
+            return published, repaired_version
+
+    LOG.warning(
+        "App update metadata not yet indexed; will retry; "
+        "installed_version=%s published_version=%s store_version=%s",
         installed,
         published,
+        store_app_latest_version(addon_slug),
     )
-    return published
+    return confirmed_version, repaired_version
 
 
 def homeassistant_core_config() -> dict[str, Any]:
@@ -996,7 +1119,8 @@ def main() -> None:
         int(config.get("app_update_check_interval_seconds", 300)),
     )
     next_update_check = 0.0
-    last_refreshed_version: str | None = None
+    confirmed_update_version: str | None = None
+    repaired_update_version: str | None = None
     LOG.info(
         "SmartAF deploy agent started; repo=%s branch=%s",
         config["github_repository"],
@@ -1043,9 +1167,13 @@ def main() -> None:
 
         if time.monotonic() >= next_update_check:
             try:
-                last_refreshed_version = refresh_store_for_app_update(
+                (
+                    confirmed_update_version,
+                    repaired_update_version,
+                ) = refresh_store_for_app_update(
                     config,
-                    last_refreshed_version,
+                    confirmed_update_version,
+                    repaired_update_version,
                 )
             except Exception as exc:
                 LOG.warning("app update metadata check failed: %s", exc)
