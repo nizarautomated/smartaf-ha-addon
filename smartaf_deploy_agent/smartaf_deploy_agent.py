@@ -13,9 +13,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib import error, request
+from urllib import error, parse, request
 
-from websocket import create_connection
+from websocket import WebSocketTimeoutException, create_connection
 
 LOG = logging.getLogger("smartaf")
 logging.basicConfig(
@@ -27,6 +27,11 @@ OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/state.json")
 BACKUP_DIR = Path("/data/backups")
 RESULT_DIR = Path("/data/results")
+DIAGNOSTIC_STATE_PATH = Path("/data/diagnostic_state.json")
+DIAGNOSTIC_RESULT_DIR = Path("/data/diagnostics")
+
+DIAGNOSTIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+ENTITY_ID_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 
 ALLOWED_NODE_CHANGES = {
     "name",
@@ -413,6 +418,364 @@ def homeassistant_websocket_check() -> str:
         websocket.close()
 
 
+
+def fetch_diagnostic_request(config: dict[str, Any]) -> dict[str, Any]:
+    branch = config["github_branch"]
+    path = config.get(
+        "diagnostic_request_path",
+        "diagnostics/request.json",
+    )
+    token = config["github_token"]
+    url = f"{github_contents_url(config, path)}?ref={branch}"
+    response = http_json(url, token)
+    content = base64.b64decode(response["content"]).decode("utf-8")
+    diagnostic = json.loads(content)
+    if not isinstance(diagnostic, dict):
+        raise ValueError("diagnostic request root must be an object")
+    return diagnostic
+
+
+def publish_diagnostic_report(
+    config: dict[str, Any],
+    diagnostic_id: str,
+    report: dict[str, Any],
+) -> None:
+    token = config["github_token"]
+    branch = config["github_branch"]
+    directory = config.get(
+        "diagnostic_report_directory",
+        "diagnostics/reports",
+    ).strip("/")
+    path = f"{directory}/{diagnostic_id}.json"
+    url = github_contents_url(config, path)
+
+    existing_sha = None
+    try:
+        existing = http_json(f"{url}?ref={branch}", token)
+        existing_sha = existing.get("sha")
+    except error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+    payload: dict[str, Any] = {
+        "message": f"Record SmartAF diagnostic {diagnostic_id}",
+        "content": base64.b64encode(
+            (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode(
+                "utf-8"
+            )
+        ).decode("ascii"),
+        "branch": branch,
+    }
+    if existing_sha:
+        payload["sha"] = existing_sha
+
+    http_json(url, token, method="PUT", payload=payload)
+
+
+def validate_diagnostic_request(
+    config: dict[str, Any],
+    diagnostic: dict[str, Any],
+) -> tuple[str, list[str], int]:
+    diagnostic_id = diagnostic.get("diagnostic_id")
+    if (
+        not isinstance(diagnostic_id, str)
+        or not DIAGNOSTIC_ID_PATTERN.fullmatch(diagnostic_id)
+    ):
+        raise ValueError(
+            "diagnostic_id must contain only letters, numbers, '.', '_' or '-'"
+        )
+
+    entity_ids = diagnostic.get("entity_ids")
+    maximum_entities = min(
+        10,
+        max(1, int(config.get("diagnostic_max_entities", 10))),
+    )
+    if (
+        not isinstance(entity_ids, list)
+        or not entity_ids
+        or len(entity_ids) > maximum_entities
+    ):
+        raise ValueError(
+            f"entity_ids must contain 1 to {maximum_entities} entities"
+        )
+    if any(
+        not isinstance(entity_id, str)
+        or not ENTITY_ID_PATTERN.fullmatch(entity_id)
+        for entity_id in entity_ids
+    ):
+        raise ValueError("entity_ids contains an invalid entity id")
+    if len(entity_ids) != len(set(entity_ids)):
+        raise ValueError("entity_ids must be unique")
+
+    duration_seconds = diagnostic.get("duration_seconds")
+    maximum_duration = min(
+        120,
+        max(10, int(config.get("diagnostic_max_duration_seconds", 120))),
+    )
+    if (
+        isinstance(duration_seconds, bool)
+        or not isinstance(duration_seconds, int)
+        or not 10 <= duration_seconds <= maximum_duration
+    ):
+        raise ValueError(
+            f"duration_seconds must be between 10 and {maximum_duration}"
+        )
+
+    return diagnostic_id, entity_ids, duration_seconds
+
+
+def homeassistant_entity_state(entity_id: str) -> dict[str, Any]:
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise RuntimeError("SUPERVISOR_TOKEN missing")
+    encoded_entity_id = parse.quote(entity_id, safe=".")
+    return http_json(
+        f"http://supervisor/core/api/states/{encoded_entity_id}",
+        token=token,
+    )
+
+
+def run_bounded_entity_diagnostic(
+    diagnostic_id: str,
+    entity_ids: list[str],
+    duration_seconds: int,
+) -> dict[str, Any]:
+    started_at = utc_now()
+    initial_states: list[dict[str, str]] = []
+    missing_entities: list[str] = []
+
+    for entity_id in entity_ids:
+        try:
+            state = homeassistant_entity_state(entity_id)
+            initial_states.append(
+                {
+                    "entity_id": entity_id,
+                    "state": str(state.get("state", "unknown")),
+                }
+            )
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            missing_entities.append(entity_id)
+
+    monitored_entity_ids = [
+        entity_id
+        for entity_id in entity_ids
+        if entity_id not in missing_entities
+    ]
+    events: list[dict[str, Any]] = []
+    dropped_event_count = 0
+
+    if monitored_entity_ids:
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if not token:
+            raise RuntimeError("SUPERVISOR_TOKEN missing")
+
+        websocket = create_connection(
+            "ws://supervisor/core/websocket",
+            timeout=10,
+            http_no_proxy=["supervisor"],
+        )
+        try:
+            challenge = json.loads(websocket.recv())
+            if challenge.get("type") != "auth_required":
+                raise RuntimeError(
+                    "WebSocket did not request authentication"
+                )
+
+            websocket.send(
+                json.dumps(
+                    {
+                        "type": "auth",
+                        "access_token": token,
+                    }
+                )
+            )
+            authentication = json.loads(websocket.recv())
+            if authentication.get("type") != "auth_ok":
+                raise RuntimeError("WebSocket authentication failed")
+
+            subscription_id = 2
+            websocket.send(
+                json.dumps(
+                    {
+                        "id": subscription_id,
+                        "type": "subscribe_trigger",
+                        "trigger": {
+                            "platform": "state",
+                            "entity_id": monitored_entity_ids,
+                        },
+                    }
+                )
+            )
+            subscription = json.loads(websocket.recv())
+            if (
+                subscription.get("id") != subscription_id
+                or subscription.get("type") != "result"
+                or subscription.get("success") is not True
+            ):
+                raise RuntimeError(
+                    "WebSocket state trigger subscription failed"
+                )
+
+            deadline = time.monotonic() + duration_seconds
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                websocket.settimeout(max(0.1, min(1.0, remaining)))
+                try:
+                    message = json.loads(websocket.recv())
+                except WebSocketTimeoutException:
+                    continue
+
+                if (
+                    message.get("id") != subscription_id
+                    or message.get("type") != "event"
+                ):
+                    continue
+
+                trigger = (
+                    message.get("event", {})
+                    .get("variables", {})
+                    .get("trigger", {})
+                )
+                from_state = trigger.get("from_state")
+                to_state = trigger.get("to_state")
+                from_state = (
+                    from_state if isinstance(from_state, dict) else {}
+                )
+                to_state = to_state if isinstance(to_state, dict) else {}
+                entity_id = (
+                    trigger.get("entity_id")
+                    or to_state.get("entity_id")
+                    or from_state.get("entity_id")
+                )
+                if entity_id not in monitored_entity_ids:
+                    continue
+
+                event = {
+                    "entity_id": entity_id,
+                    "old_state": from_state.get("state"),
+                    "new_state": to_state.get("state"),
+                    "occurred_at": (
+                        to_state.get("last_changed")
+                        or to_state.get("last_updated")
+                        or utc_now()
+                    ),
+                }
+                if len(events) < 500:
+                    events.append(event)
+                else:
+                    dropped_event_count += 1
+        finally:
+            websocket.close()
+
+    return {
+        "diagnostic_id": diagnostic_id,
+        "status": "complete",
+        "started_at": started_at,
+        "finished_at": utc_now(),
+        "duration_seconds": duration_seconds,
+        "requested_entity_ids": entity_ids,
+        "missing_entity_ids": missing_entities,
+        "initial_states": initial_states,
+        "events": events,
+        "event_count": len(events) + dropped_event_count,
+        "dropped_event_count": dropped_event_count,
+        "sanitization": {
+            "attributes_included": False,
+            "context_included": False,
+            "other_entities_included": False,
+        },
+    }
+
+
+def process_diagnostic_request(
+    config: dict[str, Any],
+    diagnostic: dict[str, Any],
+) -> None:
+    diagnostic_id = diagnostic.get("diagnostic_id")
+    if (
+        not isinstance(diagnostic_id, str)
+        or not DIAGNOSTIC_ID_PATTERN.fullmatch(diagnostic_id)
+    ):
+        raise ValueError(
+            "diagnostic_id must contain only letters, numbers, '.', '_' or '-'"
+        )
+
+    state = (
+        read_json(DIAGNOSTIC_STATE_PATH)
+        if DIAGNOSTIC_STATE_PATH.exists()
+        else {}
+    )
+    if diagnostic_id == state.get("last_diagnostic_id"):
+        return
+
+    try:
+        _, entity_ids, duration_seconds = validate_diagnostic_request(
+            config,
+            diagnostic,
+        )
+    except ValueError as exc:
+        report = {
+            "diagnostic_id": diagnostic_id,
+            "status": "rejected",
+            "started_at": utc_now(),
+            "finished_at": utc_now(),
+            "detail": str(exc),
+            "sanitization": {
+                "attributes_included": False,
+                "context_included": False,
+                "other_entities_included": False,
+            },
+        }
+        entity_count = 0
+    else:
+        entity_count = len(entity_ids)
+        try:
+            report = run_bounded_entity_diagnostic(
+                diagnostic_id,
+                entity_ids,
+                duration_seconds,
+            )
+        except Exception as exc:
+            LOG.exception("diagnostic %s failed", diagnostic_id)
+            report = {
+                "diagnostic_id": diagnostic_id,
+                "status": "failed",
+                "started_at": utc_now(),
+                "finished_at": utc_now(),
+                "duration_seconds": duration_seconds,
+                "requested_entity_ids": entity_ids,
+                "detail": str(exc),
+                "sanitization": {
+                    "attributes_included": False,
+                    "context_included": False,
+                    "other_entities_included": False,
+                },
+            }
+
+    DIAGNOSTIC_RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(
+        DIAGNOSTIC_RESULT_DIR / f"{diagnostic_id}.json",
+        report,
+    )
+    publish_diagnostic_report(config, diagnostic_id, report)
+    write_json_atomic(
+        DIAGNOSTIC_STATE_PATH,
+        {
+            "last_diagnostic_id": diagnostic_id,
+            "last_status": report["status"],
+            "processed_at": report["finished_at"],
+        },
+    )
+    LOG.info(
+        "diagnostic=%s status=%s entities=%s events=%s",
+        diagnostic_id,
+        report["status"],
+        entity_count,
+        report.get("event_count", 0),
+    )
+
 def restart_nodered(config: dict[str, Any]) -> None:
     addon_slug = config["nodered_addon_slug"]
     supervisor_request(f"/addons/{addon_slug}/restart", method="POST")
@@ -665,9 +1028,18 @@ def main() -> None:
             process_deployment(config, deployment)
         except error.HTTPError as exc:
             if exc.code != 404:
-                LOG.error("GitHub HTTP error: %s", exc)
+                LOG.error("GitHub deployment HTTP error: %s", exc)
         except Exception as exc:
-            LOG.exception("poll failed: %s", exc)
+            LOG.exception("deployment poll failed: %s", exc)
+
+        try:
+            diagnostic = fetch_diagnostic_request(config)
+            process_diagnostic_request(config, diagnostic)
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                LOG.error("GitHub diagnostic HTTP error: %s", exc)
+        except Exception as exc:
+            LOG.exception("diagnostic poll failed: %s", exc)
 
         if time.monotonic() >= next_update_check:
             try:
