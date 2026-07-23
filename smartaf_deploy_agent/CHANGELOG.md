@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Sync an explicit allowlist of SmartAF custom integration files into Home Assistant config.
+- Write each integration file atomically and never modify `configuration.yaml` or `.storage`.
+- Keep future custom integration code updates separate from SmartAF app releases.
+- Require a Home Assistant Core restart after a changed integration bundle is synced.
+
 ## 0.4.1
 
 - Ignore attribute-only Home Assistant updates where the old and new entity state are equal.
