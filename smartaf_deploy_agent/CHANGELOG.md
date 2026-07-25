@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.5
+
+- Add an HMAC-signed, two-minute command bridge for fixed Home Assistant management actions.
+- Support Core configuration checks, Core restart and safe Core, Supervisor and host information reads.
+- Support app-store and update-metadata reloads plus installed app info, start, restart and update.
+- Reject free-form shell text, arbitrary paths and HTTP requests, stop/shutdown/reboot actions, unknown app slugs, replayed or expired requests, and self-mutation of the SmartAF app.
+- Publish credential-free command results under a fixed report directory.
+- Do not add or change any user configuration fields, preserving upgrade compatibility.
+
 ## 0.6.4
 
 - Add bounded read-only log sources for Home Assistant Core, Supervisor, host, DNS, audio, multicast, and every installed Home Assistant app.
