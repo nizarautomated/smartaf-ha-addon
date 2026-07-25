@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+- Keep upgrades from older installations compatible by making `current_flows_path` optional in the app configuration schema.
+- Preserve the built-in `current/flows.json` default when the option is absent.
+- Publish release notes before raising the app version so Supervisor can index the changelog before offering the update.
+
 ## 0.5.1
 
 - Compare the validated live Node-RED graph with `current/flows.json` on every poll.
