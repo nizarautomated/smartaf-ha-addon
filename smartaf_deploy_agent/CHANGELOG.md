@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Remove the new log-diagnostic configuration fields from the Supervisor schema because the collector already has safe internal defaults.
+- Keep existing installations fully upgrade-compatible without requiring Supervisor to reconcile new stored options.
+- Preserve the same bounded log sources, limits, redaction, and report paths introduced in 0.6.0.
+
 ## 0.6.0
 
 - Add bounded, read-only log diagnostics requested through `diagnostics/log_request.json`.
