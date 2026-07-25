@@ -43,6 +43,7 @@ STATE_PATH = Path("/data/approval_state.json")
 PROPOSAL_PATH = "proposals/pending.json"
 STATUS_DIRECTORY = "proposals/status"
 DEFAULT_NOTIFY_SERVICE = "notify.mobile_app_s25"
+NOTIFICATION_CHANNEL = "SmartAF approvals"
 NOTIFY_SERVICE_PATTERN = re.compile(r"^notify\.mobile_app_[a-z0-9_]+$")
 MAX_ERROR_LENGTH = 1000
 ACTION_TIMEOUT_SECONDS = 55
@@ -249,6 +250,11 @@ def send_approval_notification(
             ),
             "data": {
                 "tag": notification_tag(proposal["proposal_id"]),
+                "channel": NOTIFICATION_CHANNEL,
+                "importance": "high",
+                "priority": "high",
+                "ttl": 0,
+                "visibility": "public",
                 "persistent": True,
                 "sticky": True,
                 "actions": [
@@ -393,6 +399,13 @@ def start_proposal(
         approve_action,
         reject_action,
     )
+    LOG.info(
+        "approval notification accepted; proposal=%s service=%s "
+        "channel=%s priority=high",
+        proposal["proposal_id"],
+        notify_service,
+        NOTIFICATION_CHANNEL,
+    )
     proposal_hash = canonical_sha256(proposal)
     state = {
         "phase": "awaiting_approval",
@@ -416,6 +429,9 @@ def start_proposal(
             source_sha256=proposal["deployment"]["source_sha256"],
             target_sha256=target_sha256,
             risk=proposal["risk"],
+            notification_service=notify_service,
+            notification_channel=NOTIFICATION_CHANNEL,
+            notification_priority="high",
         ),
     )
     return state
@@ -533,6 +549,55 @@ def main() -> None:
             raw_proposal = fetch_github_json(config, PROPOSAL_PATH)
             if raw_proposal is not None:
                 raw_hash = canonical_sha256(raw_proposal)
+                if (
+                    state.get("phase") == "awaiting_approval"
+                    and raw_hash
+                    != state.get("last_raw_proposal_sha256")
+                ):
+                    previous_id = state["proposal_id"]
+                    candidate = raw_proposal.get("proposal_id")
+                    replacement_id = (
+                        candidate
+                        if isinstance(candidate, str)
+                        and re.fullmatch(
+                            r"[A-Za-z0-9._-]{1,100}",
+                            candidate,
+                        )
+                        else "invalid-proposal"
+                    )
+                    publish_status(
+                        config,
+                        previous_id,
+                        proposal_status(
+                            previous_id,
+                            "superseded",
+                            "A new proposal replaced this unanswered "
+                            "proposal; its mobile actions are invalid",
+                            proposal_sha256=state["proposal_sha256"],
+                            superseded_by=replacement_id,
+                        ),
+                    )
+                    try:
+                        clear_approval_notification(
+                            state["notify_service"],
+                            previous_id,
+                        )
+                    except Exception:
+                        LOG.exception(
+                            "superseded notification clear failed"
+                        )
+                    state = {
+                        **state,
+                        "phase": "completed",
+                        "decision": "superseded",
+                        "completed_at": int(time.time()),
+                    }
+                    write_json_atomic(STATE_PATH, state)
+                    LOG.info(
+                        "proposal=%s decision=superseded replacement=%s",
+                        previous_id,
+                        replacement_id,
+                    )
                 if (
                     state.get("phase") != "awaiting_approval"
                     and raw_hash != state.get("last_raw_proposal_sha256")
