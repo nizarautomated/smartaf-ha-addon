@@ -1,5 +1,5 @@
 name: SmartAF Node-RED Deploy Agent
-version: "0.6.5"
+version: "0.6.6"
 slug: smartaf_nodered_deploy
 description: Applies validated Node-RED patches, runs bounded diagnostics, and syncs the SmartAF custom integration.
 url: https://github.com/nizarautomated/smartaf-ha-addon
@@ -37,6 +37,8 @@ options:
   diagnostic_report_directory: diagnostics/reports
   diagnostic_max_entities: 10
   diagnostic_max_duration_seconds: 120
+  approval_notify_service: notify.mobile_app_s25
+  approval_required: true
 schema:
   github_repository: str
   github_branch: str
@@ -57,3 +59,5 @@ schema:
   diagnostic_report_directory: str
   diagnostic_max_entities: int(1,10)
   diagnostic_max_duration_seconds: int(10,120)
+  approval_notify_service: "str?"
+  approval_required: "bool?"
