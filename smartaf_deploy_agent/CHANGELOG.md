@@ -1,10 +1,15 @@
 # Changelog
 
+## 0.6.2
+
+- Restore build compatibility with Home Assistant Supervisor 2026.04 and newer by explicitly defining architecture-specific base images in `build.yaml`.
+- Keep the app Dockerfile's `BUILD_FROM` contract while no longer depending on Supervisor's removed implicit fallback.
+- Do not add or change any user configuration fields.
+
 ## 0.6.1
 
-- Remove the new log-diagnostic configuration fields from the Supervisor schema because the collector already has safe internal defaults.
-- Keep existing installations fully upgrade-compatible without requiring Supervisor to reconcile new stored options.
-- Preserve the same bounded log sources, limits, redaction, and report paths introduced in 0.6.0.
+- Remove the log diagnostic settings from the Supervisor schema entirely because the collector already has safe internal defaults.
+- Keep existing stored app configurations unchanged so Supervisor can offer the update without requiring new fields.
 
 ## 0.6.0
 
