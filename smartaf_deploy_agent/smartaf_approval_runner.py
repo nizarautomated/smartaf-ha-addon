@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -327,6 +328,21 @@ def wait_for_mobile_action(
         timeout=timeout,
         http_no_proxy=["supervisor"],
     )
+    timed_out = threading.Event()
+
+    def abort_on_timeout() -> None:
+        timed_out.set()
+        try:
+            websocket.abort()
+        except Exception:
+            try:
+                websocket.close()
+            except Exception:
+                pass
+
+    watchdog = threading.Timer(timeout, abort_on_timeout)
+    watchdog.daemon = True
+    watchdog.start()
     try:
         challenge = json.loads(websocket.recv())
         if challenge.get("type") != "auth_required":
@@ -377,8 +393,14 @@ def wait_for_mobile_action(
             if action == reject_action:
                 return "rejected", user_id
         return None
+    except Exception:
+        if timed_out.is_set():
+            return None
+        raise
     finally:
-        websocket.close()
+        watchdog.cancel()
+        if not timed_out.is_set():
+            websocket.close()
 
 
 def start_proposal(
