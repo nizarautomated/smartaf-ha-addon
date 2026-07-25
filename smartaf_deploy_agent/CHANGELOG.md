@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Fix the optional `current_flows_path` schema syntax so Supervisor no longer interprets `current_flows_path?` as a literal required option name.
+- Remove the option-level default so upgrades without this stored field remain valid; the agent keeps using its built-in `current/flows.json` fallback.
+
 ## 0.5.2
 
 - Keep upgrades from older installations compatible by making `current_flows_path` optional in the app configuration schema.
