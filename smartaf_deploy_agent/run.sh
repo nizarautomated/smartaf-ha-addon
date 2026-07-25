@@ -1,3 +1,8 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
-exec python3 /opt/smartaf/smartaf_deploy_agent.py
+
+python3 /opt/smartaf/smartaf_log_collector.py &
+collector_pid=$!
+trap 'kill "$collector_pid" 2>/dev/null || true' EXIT INT TERM
+
+python3 /opt/smartaf/smartaf_deploy_agent.py 2>&1 | tee -a /data/smartaf-agent.log
