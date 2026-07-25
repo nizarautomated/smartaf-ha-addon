@@ -17,6 +17,8 @@ from urllib import error, parse, request
 
 from websocket import WebSocketTimeoutException, create_connection
 
+from smartaf_approval import ensure_approval_key, verify_approval_certificate
+
 LOG = logging.getLogger("smartaf")
 logging.basicConfig(
     level=logging.INFO,
@@ -1099,7 +1101,7 @@ def finish_deployment(
     deployment_id: str,
     status: str,
     detail: str,
-    hashes: dict[str, str] | None = None,
+    hashes: dict[str, Any] | None = None,
 ) -> None:
     result: dict[str, Any] = {
         "deployment_id": deployment_id,
@@ -1146,6 +1148,27 @@ def process_deployment(
     state = read_json(STATE_PATH) if STATE_PATH.exists() else {}
     if deployment_id == state.get("last_deployment_id"):
         return
+
+    approval_required = config.get("approval_required", True) is not False
+    approval_info: dict[str, Any] | None = None
+    if approval_required:
+        try:
+            approval_info = verify_approval_certificate(
+                deployment,
+                ensure_approval_key(),
+            )
+        except (RuntimeError, ValueError) as exc:
+            finish_deployment(
+                config,
+                deployment_id,
+                "rejected",
+                f"mobile approval required: {exc}",
+                {
+                    "approval_required": True,
+                    "approval_verified": False,
+                },
+            )
+            return
 
     flows_path = Path(config["flows_path"])
     if not flows_path.is_file():
@@ -1198,12 +1221,22 @@ def process_deployment(
         json.dumps(patched_nodes, ensure_ascii=False, indent=2) + "\n"
     ).encode("utf-8")
 
-    hashes = {
+    hashes: dict[str, Any] = {
         "source_sha256": source_hash,
         "source_raw_sha256": source_raw_hash,
         "target_sha256": target_hash,
         "target_raw_sha256": raw_sha256(patched_raw),
+        "approval_required": approval_required,
+        "approval_verified": approval_info is not None,
     }
+    if approval_info is not None:
+        hashes.update(
+            {
+                "proposal_id": approval_info["proposal_id"],
+                "approved_at": approval_info["approved_at"],
+                "approval_expires_at": approval_info["expires_at"],
+            }
+        )
 
     if config.get("dry_run"):
         finish_deployment(
