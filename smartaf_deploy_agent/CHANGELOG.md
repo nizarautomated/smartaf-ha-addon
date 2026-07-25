@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3
+
+- Fix the Alpine 3.22 PEP 668 build failure by explicitly allowing pip to install the pinned Python dependency inside the isolated add-on container.
+- Keep the existing architecture-specific Home Assistant base images and runtime entrypoint unchanged.
+- Do not add or change any user configuration fields.
+
 ## 0.6.2
 
 - Restore build compatibility with Home Assistant Supervisor 2026.04 and newer by explicitly defining architecture-specific base images in `build.yaml`.
