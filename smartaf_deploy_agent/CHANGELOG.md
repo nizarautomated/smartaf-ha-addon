@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.6
+
+- Add a separate proposal runner that revalidates the live source hash, existing architecture and conflict declarations, graph integrity, node count, server configuration and the exact target hash before requesting approval.
+- Send an authenticated actionable notification to the configured Home Assistant Companion app and accept only the unique approval or rejection action for that proposal.
+- Bind approval to the exact deployment with a local HMAC certificate that expires after ten minutes; altered, unsigned, replayed or expired deployments are rejected before any Node-RED write.
+- Keep proposal storage, mobile approval, deployment and rollback as separate capabilities; rejection or timeout never queues a deployment.
+- Add only optional `approval_notify_service` and `approval_required` settings with safe internal defaults, preserving upgrade compatibility for existing installations.
+
 ## 0.6.5
 
 - Add an HMAC-signed, two-minute command bridge for fixed Home Assistant management actions.
