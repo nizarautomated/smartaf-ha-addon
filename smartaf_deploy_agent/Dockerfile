@@ -10,6 +10,8 @@ COPY run.sh /run.sh
 COPY smartaf_deploy_agent.py /opt/smartaf/smartaf_deploy_agent.py
 COPY smartaf_log_collector.py /opt/smartaf/smartaf_log_collector.py
 COPY smartaf_command_runner.py /opt/smartaf/smartaf_command_runner.py
+COPY smartaf_approval.py /opt/smartaf/smartaf_approval.py
+COPY smartaf_approval_runner.py /opt/smartaf/smartaf_approval_runner.py
 RUN chmod a+x /run.sh
 
 CMD ["/run.sh"]
