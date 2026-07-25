@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.4
+
+- Add bounded read-only log sources for Home Assistant Core, Supervisor, host, DNS, audio, multicast, and every installed Home Assistant app.
+- Add the fixed `all` source alias while keeping arbitrary filesystem paths and arbitrary app slugs forbidden.
+- Cap every combined log report at 2,000 lines, cap individual requests at 500 lines per source, and retain credential redaction.
+- Use the official Supervisor journal endpoints with timestamps and terminal colors removed.
+- Do not add or change any user configuration fields, preserving upgrade compatibility.
+
+
 ## 0.6.3
 
 - Fix the Alpine 3.22 PEP 668 build failure by explicitly allowing pip to install the pinned Python dependency inside the isolated add-on container.
