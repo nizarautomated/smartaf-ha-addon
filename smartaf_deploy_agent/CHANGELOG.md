@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.7
+
+- Deliver mobile approval requests through a dedicated high-importance Android notification channel with immediate high-priority delivery.
+- Record the selected notification service and delivery profile in the proposal status without exposing credentials or action tokens.
+- Safely supersede an unanswered proposal when a new proposal is submitted; the old unique actions are invalidated and can never queue a deployment.
+- Do not add or change any user configuration fields, preserving upgrade compatibility.
+
 ## 0.6.6
 
 - Add a separate proposal runner that revalidates the live source hash, existing architecture and conflict declarations, graph integrity, node count, server configuration and the exact target hash before requesting approval.
