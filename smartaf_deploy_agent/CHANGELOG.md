@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Add bounded, read-only log diagnostics requested through `diagnostics/log_request.json`.
+- Support explicit allowlisted sources for Home Assistant Core, Node-RED, and the SmartAF Deploy Agent.
+- Limit reports to the requested tail size and redact bearer tokens, authorization headers, GitHub tokens, webhook secrets, passwords, and URL credentials before publication.
+- Publish sanitized reports under `diagnostics/log_reports/`; never expose arbitrary filesystem paths or add-on slugs from a request.
+- Keep every new option optional with internal defaults so existing installations remain upgrade-compatible.
+
 ## 0.5.3
 
 - Fix the optional `current_flows_path` schema syntax so Supervisor no longer interprets `current_flows_path?` as a literal required option name.
