@@ -24,7 +24,11 @@ Maak een fine-grained GitHub-token voor uitsluitend:
 - permission: **Contents — Read and write**.
 
 Het token is nodig om deployments te lezen en het resultaat terug te schrijven
-naar `deployments/status/<deployment_id>.json`.
+naar `deployments/status/<deployment_id>.json`. De agent vergelijkt daarnaast
+de gevalideerde live graph met `current/flows.json`. Alleen wanneer de canonieke
+hash afwijkt, schrijft hij de live graph terug naar deze repositorybaseline.
+Een tijdelijke GitHub-fout blokkeert Node-RED niet: de synchronisatie wordt bij
+de volgende poll opnieuw geprobeerd.
 
 Vul het token in bij `github_token`. Laat de overige waarden ongewijzigd,
 tenzij het Node-RED app-ID of het pad naar `flows.json` op jouw installatie
@@ -35,12 +39,15 @@ anders is.
 De app krijgt:
 
 - schrijfbare toegang tot `/addon_configs`;
+- schrijfbare toegang tot `/homeassistant/custom_components/smartaf`;
 - toegang tot de Supervisor-API met de rol `manager`;
 - een eigen, schrijfbare `/data`-map voor back-ups en status.
 
-De app mount niet de Home Assistant-configuratiemap. De code leest of wijzigt
-uitsluitend het ingestelde `flows_path`. Door de mapmachtiging kan het proces
-technisch andere app-configuratiebestanden bereiken; daarom moet de publieke
+Voor Node-RED leest of wijzigt de code uitsluitend het ingestelde `flows_path`.
+Binnen de Home Assistant-configuratiemap synchroniseert de app uitsluitend de
+vaste allowlist onder `custom_components/smartaf`; `configuration.yaml` en
+`.storage` worden niet gewijzigd. Door de mapmachtigingen kan het proces
+technisch andere configuratiebestanden bereiken; daarom moet de publieke
 broncode en iedere wijziging eraan worden gecontroleerd.
 
 ## Lokale gegevens

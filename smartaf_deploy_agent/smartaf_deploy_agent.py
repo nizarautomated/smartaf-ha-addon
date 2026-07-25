@@ -189,6 +189,64 @@ def publish_status(
     http_json(url, token, method="PUT", payload=payload)
 
 
+def sync_current_flows(config: dict[str, Any]) -> bool:
+    """Publish the validated live graph when the repository baseline differs."""
+    flows_path = Path(config["flows_path"])
+    if not flows_path.is_file():
+        raise FileNotFoundError(f"flows file not found: {flows_path}")
+
+    live_nodes = json.loads(flows_path.read_text(encoding="utf-8"))
+    validate_graph(live_nodes)
+    live_hash = canonical_sha256(live_nodes)
+
+    token = config["github_token"]
+    branch = config["github_branch"]
+    path = config.get("current_flows_path", "current/flows.json").strip("/")
+    if not path:
+        raise ValueError("current_flows_path must not be empty")
+
+    url = github_contents_url(config, path)
+    existing_sha = None
+    try:
+        existing = http_json(f"{url}?ref={branch}", token)
+        existing_sha = existing.get("sha")
+        encoded = existing.get("content")
+        if not isinstance(encoded, str):
+            raise RuntimeError("current flows file has no content")
+        current_nodes = json.loads(
+            base64.b64decode("".join(encoded.split()), validate=True).decode(
+                "utf-8"
+            )
+        )
+        validate_graph(current_nodes)
+        if canonical_sha256(current_nodes) == live_hash:
+            return False
+    except error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+    content = json.dumps(live_nodes, ensure_ascii=False, indent=2) + "\n"
+    payload: dict[str, Any] = {
+        "message": (
+            "Sync current Node-RED flows from verified live graph "
+            f"({live_hash[:12]})"
+        ),
+        "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if existing_sha:
+        payload["sha"] = existing_sha
+
+    http_json(url, token, method="PUT", payload=payload)
+    LOG.info(
+        "current flows synced; path=%s nodes=%s canonical_sha256=%s",
+        path,
+        len(live_nodes),
+        live_hash,
+    )
+    return True
+
+
 def validate_graph(nodes: Any) -> None:
     if not isinstance(nodes, list):
         raise ValueError("flows.json root must be a list")
@@ -1279,6 +1337,11 @@ def main() -> None:
         LOG.exception("SmartAF custom integration sync failed: %s", exc)
 
     while True:
+        try:
+            sync_current_flows(config)
+        except Exception as exc:
+            LOG.warning("current flows sync failed; will retry: %s", exc)
+
         try:
             deployment = fetch_deployment(config)
             process_deployment(config, deployment)

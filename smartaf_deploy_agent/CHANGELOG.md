@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- Compare the validated live Node-RED graph with `current/flows.json` on every poll.
+- Write the live graph back only when its canonical hash differs.
+- Retry repository synchronization after transient GitHub failures without blocking Node-RED deployments.
+- Document the existing Home Assistant custom integration mount accurately.
+
 ## 0.5.0
 
 - Sync an explicit allowlist of SmartAF custom integration files into Home Assistant config.
