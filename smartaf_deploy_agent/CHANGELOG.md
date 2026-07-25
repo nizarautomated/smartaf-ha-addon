@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.8
+
+- Enforce the mobile-action wait deadline with an independent watchdog that aborts a stuck Home Assistant WebSocket through the Supervisor proxy.
+- Resume proposal polling after the deadline so unanswered proposals can expire or be safely superseded by a newer proposal.
+- Keep mobile approval, HMAC certificates and every deployment validation unchanged.
+- Do not add or change any user configuration fields, preserving upgrade compatibility.
+
 ## 0.6.7
 
 - Deliver mobile approval requests through a dedicated high-importance Android notification channel with immediate high-priority delivery.
