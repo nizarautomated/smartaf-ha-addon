@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.12
+
+- Treat an omitted Home Assistant Core `state` field as unknown instead of unhealthy when the Supervisor endpoint itself succeeds; still reject every explicit state other than `started` or `running`.
+- Read the public app version from `raw.githubusercontent.com` instead of the rate-limited unauthenticated GitHub Contents API.
+- Keep health checks, flow validation, deployment safety, disabled-by-default retention and every stored option unchanged.
+- Add no configuration fields and keep all existing Home Assistant app configurations valid.
+
 ## 0.6.11
 
 - Publish a central, credential-free health report for Home Assistant Core, Supervisor, Node-RED, the verified live flow graph, its repository baseline, the SmartAF integration and the Deploy Agent.
