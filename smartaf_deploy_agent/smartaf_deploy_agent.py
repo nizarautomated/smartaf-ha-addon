@@ -446,11 +446,17 @@ def fetch_published_app_version(config: dict[str, Any]) -> str:
         "smartaf_deploy_agent/config.yaml",
     )
     url = (
-        f"https://api.github.com/repos/{repository}/contents/{path}"
-        f"?ref={branch}"
+        f"https://raw.githubusercontent.com/"
+        f"{parse.quote(str(repository), safe='/')}/"
+        f"{parse.quote(str(branch), safe='/')}/"
+        f"{parse.quote(str(path), safe='/')}"
     )
-    response = http_json(url)
-    content = base64.b64decode(response["content"]).decode("utf-8")
+    http_request = request.Request(
+        url,
+        headers={"User-Agent": "SmartAF-Deploy-Agent"},
+    )
+    with request.urlopen(http_request, timeout=30) as response:
+        content = response.read().decode("utf-8")
     match = re.search(
         r"(?m)^version:\s*[\"']?([^\"'\s#]+)",
         content,

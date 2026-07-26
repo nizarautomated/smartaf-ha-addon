@@ -690,12 +690,15 @@ def build_health(
         ),
         "smartaf_integration": checked_component(integration_health),
     }
+    core_state = components["home_assistant_core"].get("state")
     operational = (
         all(component["status"] == "ok" for component in components.values())
         and components["supervisor"].get("healthy") is True
         and components["supervisor"].get("supported") is not False
-        and components["home_assistant_core"].get("state")
-        in {"started", "running"}
+        and (
+            core_state is None
+            or core_state in {"started", "running"}
+        )
         and components["smartaf_deploy_agent"].get("state")
         in {"started", "running"}
         and components["node_red"].get("state") in {"started", "running"}

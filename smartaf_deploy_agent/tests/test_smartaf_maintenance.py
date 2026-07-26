@@ -117,6 +117,105 @@ class MaintenanceTests(unittest.TestCase):
             maintenance.health_fingerprint(degraded),
         )
 
+    def test_missing_core_state_does_not_create_false_degraded_health(
+        self,
+    ) -> None:
+        config = {
+            "nodered_addon_slug": "node_red",
+            "flows_path": "/flows.json",
+        }
+        component_values = {
+            "supervisor_health": {
+                "healthy": True,
+                "supported": True,
+            },
+            "core_health": {"version": "2026.7.3"},
+            "self_health": {"state": "started"},
+            "addon_health": {"state": "started"},
+            "flow_health": {"baseline_in_sync": True},
+            "integration_health": {"version": "0.5.1"},
+        }
+        with (
+            patch.object(
+                maintenance,
+                "supervisor_health",
+                return_value=component_values["supervisor_health"],
+            ),
+            patch.object(
+                maintenance,
+                "core_health",
+                return_value=component_values["core_health"],
+            ),
+            patch.object(
+                maintenance,
+                "self_health",
+                return_value=component_values["self_health"],
+            ),
+            patch.object(
+                maintenance,
+                "addon_health",
+                return_value=component_values["addon_health"],
+            ),
+            patch.object(
+                maintenance,
+                "flow_health",
+                return_value=component_values["flow_health"],
+            ),
+            patch.object(
+                maintenance,
+                "integration_health",
+                return_value=component_values["integration_health"],
+            ),
+        ):
+            health = maintenance.build_health(
+                config,
+                {"enabled": False},
+            )
+        self.assertEqual("healthy", health["overall_status"])
+
+    def test_explicit_stopped_core_state_is_degraded(self) -> None:
+        config = {
+            "nodered_addon_slug": "node_red",
+            "flows_path": "/flows.json",
+        }
+        with (
+            patch.object(
+                maintenance,
+                "supervisor_health",
+                return_value={"healthy": True, "supported": True},
+            ),
+            patch.object(
+                maintenance,
+                "core_health",
+                return_value={"state": "stopped"},
+            ),
+            patch.object(
+                maintenance,
+                "self_health",
+                return_value={"state": "started"},
+            ),
+            patch.object(
+                maintenance,
+                "addon_health",
+                return_value={"state": "started"},
+            ),
+            patch.object(
+                maintenance,
+                "flow_health",
+                return_value={"baseline_in_sync": True},
+            ),
+            patch.object(
+                maintenance,
+                "integration_health",
+                return_value={"version": "0.5.1"},
+            ),
+        ):
+            health = maintenance.build_health(
+                config,
+                {"enabled": False},
+            )
+        self.assertEqual("degraded", health["overall_status"])
+
     def test_retention_failure_before_commit_never_deletes(self) -> None:
         now = datetime(2026, 7, 26, tzinfo=timezone.utc)
         config = {
