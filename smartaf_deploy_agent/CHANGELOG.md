@@ -1,4 +1,16 @@
+Exit code: 0
+Wall time: 0.2 seconds
+Output:
 # Changelog
+
+## 0.6.11
+
+- Publish a central, credential-free health report for Home Assistant Core, Supervisor, Node-RED, the verified live flow graph, its repository baseline, the SmartAF integration and the Deploy Agent.
+- Run health collection in a separate read-only maintenance process with change-triggered publication and a bounded six-hour heartbeat; do not add automatic pattern recognition.
+- Add optional historical-report retention that is disabled by default and deletes a report only when it is both older than 90 days and outside the newest 100 reports.
+- Restrict retention to the five fixed report directories, preserve unparseable reports and every request, audit, flow baseline, health, local-state and backup path, and cap each run at 100 deletions.
+- Batch eligible deletions into one non-forced GitHub commit so a concurrent report publication prevents cleanup instead of losing new data.
+- Keep all six new configuration fields optional and out of stored defaults so every existing Home Assistant app configuration remains valid.
 
 ## 0.6.10
 
@@ -112,7 +124,7 @@
 ## 0.4.0
 
 - Add bounded read-only entity diagnostics requested through `diagnostics/request.json`.
-- Allow 1–10 explicit entity IDs and a 10–120 second measurement window.
+- Allow 1â€“10 explicit entity IDs and a 10â€“120 second measurement window.
 - Capture only initial states and filtered state transitions for those entities.
 - Publish sanitized reports under `diagnostics/reports/` without attributes, context IDs, tokens, service calls, or unrelated entities.
 - Process each `diagnostic_id` only once.
@@ -143,3 +155,4 @@
 ## 0.1.0
 
 - Initial SmartAF Node-RED Deploy Agent release.
+
