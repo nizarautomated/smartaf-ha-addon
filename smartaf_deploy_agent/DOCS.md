@@ -21,7 +21,7 @@ mislukt, wordt automatisch teruggerold.
 Maak een fine-grained GitHub-token voor uitsluitend:
 
 - repository: `nizarautomated/home-assistant-node-red`;
-- permission: **Contents — Read and write**.
+- permission: **Contents â€” Read and write**.
 
 Het token is nodig om deployments te lezen en het resultaat terug te schrijven
 naar `deployments/status/<deployment_id>.json`. De agent vergelijkt daarnaast
@@ -33,6 +33,43 @@ de volgende poll opnieuw geprobeerd.
 Vul het token in bij `github_token`. Laat de overige waarden ongewijzigd,
 tenzij het Node-RED app-ID of het pad naar `flows.json` op jouw installatie
 anders is.
+
+## Centrale healthstatus
+
+De aparte maintenance-runner controleert Home Assistant Core, Supervisor,
+Node-RED, de live flowgraph, de repositorybaseline, de SmartAF-integratie en de
+Deploy Agent zelf. De actuele, credentialvrije status wordt lokaal opgeslagen
+in `/data/health.json` en centraal gepubliceerd naar `health/current.json`.
+Statuswijzigingen worden direct bij de volgende controle gepubliceerd; een
+ongewijzigde status krijgt standaard iedere zes uur een heartbeat.
+
+De healthchecks zijn read-only. Ze schrijven niet naar Home Assistant,
+Node-RED of de flowgraph en voeren geen patroonherkenning uit.
+
+## Rapportretentie
+
+Historische deployment-, voorstel-, diagnose-, logdiagnose- en
+commandorapporten kunnen begrensd worden met de optionele instelling
+`report_retention_enabled`. Deze staat intern standaard uit. Na inschakeling
+wordt een rapport alleen verwijderd wanneer het zowel ouder is dan
+`report_retention_days` (standaard 90 dagen) als buiten de nieuwste
+`report_retention_count` rapporten (standaard 100) valt.
+
+Per onderhoudsrun worden maximaal 500 rapporten per map bekeken en maximaal
+100 rapporten in Ã©Ã©n atomische GitHub-commit verwijderd. Rapporten zonder
+betrouwbare tijdstempel blijven altijd bewaard. Verzoekbestanden, audits,
+`current/flows.json`, healthstatus, lokale status en back-ups vallen buiten
+retentie.
+
+Alle maintenance-instellingen zijn optioneel en hebben veilige interne
+standaardwaarden:
+
+- `health_report_path`;
+- `health_publish_interval_seconds`;
+- `report_retention_enabled`;
+- `report_retention_days`;
+- `report_retention_count`;
+- `report_retention_check_interval_seconds`.
 
 ## Rechten
 
@@ -55,3 +92,4 @@ broncode en iedere wijziging eraan worden gecontroleerd.
 - back-ups: `/data/backups`;
 - resultaten: `/data/results`;
 - laatst verwerkte deployment: `/data/state.json`.
+
