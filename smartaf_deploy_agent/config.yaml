@@ -67,4 +67,3 @@ schema:
   report_retention_days: "int(7,3650)?"
   report_retention_count: "int(10,1000)?"
   report_retention_check_interval_seconds: "int(3600,604800)?"
-

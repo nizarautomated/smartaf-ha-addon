@@ -16,4 +16,3 @@ COPY smartaf_maintenance.py /opt/smartaf/smartaf_maintenance.py
 RUN chmod a+x /run.sh
 
 CMD ["/run.sh"]
-

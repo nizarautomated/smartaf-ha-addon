@@ -12,4 +12,3 @@ maintenance_pid=$!
 trap 'kill "$collector_pid" "$command_runner_pid" "$approval_runner_pid" "$maintenance_pid" 2>/dev/null || true' EXIT INT TERM
 
 python3 /opt/smartaf/smartaf_deploy_agent.py 2>&1 | tee -a /data/smartaf-agent.log
-

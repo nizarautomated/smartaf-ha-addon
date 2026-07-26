@@ -21,7 +21,7 @@ mislukt, wordt automatisch teruggerold.
 Maak een fine-grained GitHub-token voor uitsluitend:
 
 - repository: `nizarautomated/home-assistant-node-red`;
-- permission: **Contents â€” Read and write**.
+- permission: **Contents — Read and write**.
 
 Het token is nodig om deployments te lezen en het resultaat terug te schrijven
 naar `deployments/status/<deployment_id>.json`. De agent vergelijkt daarnaast
@@ -56,7 +56,7 @@ wordt een rapport alleen verwijderd wanneer het zowel ouder is dan
 `report_retention_count` rapporten (standaard 100) valt.
 
 Per onderhoudsrun worden maximaal 500 rapporten per map bekeken en maximaal
-100 rapporten in Ã©Ã©n atomische GitHub-commit verwijderd. Rapporten zonder
+100 rapporten in één atomische GitHub-commit verwijderd. Rapporten zonder
 betrouwbare tijdstempel blijven altijd bewaard. Verzoekbestanden, audits,
 `current/flows.json`, healthstatus, lokale status en back-ups vallen buiten
 retentie.
@@ -92,4 +92,3 @@ broncode en iedere wijziging eraan worden gecontroleerd.
 - back-ups: `/data/backups`;
 - resultaten: `/data/results`;
 - laatst verwerkte deployment: `/data/state.json`.
-
