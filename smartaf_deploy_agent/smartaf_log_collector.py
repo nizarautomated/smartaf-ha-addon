@@ -122,6 +122,50 @@ def github_contents_url(config: dict[str, Any], path: str) -> str:
     return f"https://api.github.com/repos/{repository}/contents/{path}"
 
 
+def delete_repository_file(
+    config: dict[str, Any],
+    path: str,
+    message: str,
+) -> bool:
+    """Delete one processed queue pointer while preserving its report."""
+    branch = str(config.get("github_branch", "main"))
+    token = str(config.get("github_token", ""))
+    url = github_contents_url(config, path.strip("/"))
+    try:
+        existing = json.loads(
+            http_bytes(
+                f"{url}?ref={parse.quote(branch, safe='')}",
+                token,
+            ).decode("utf-8")
+        )
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+    sha = existing.get("sha") if isinstance(existing, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise RuntimeError(f"queue pointer has no SHA: {path}")
+    payload = json.dumps(
+        {"message": message, "sha": sha, "branch": branch}
+    ).encode("utf-8")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "SmartAF-Log-Diagnostics",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    http_request = request.Request(
+        url,
+        data=payload,
+        headers=headers,
+        method="DELETE",
+    )
+    with request.urlopen(http_request, timeout=30):
+        pass
+    return True
+
+
 def fetch_request(config: dict[str, Any]) -> dict[str, Any] | None:
     path = str(
         config.get("log_diagnostic_request_path")
@@ -469,6 +513,27 @@ def main() -> None:
                         request_id,
                         report["status"],
                     )
+                request_is_processed = (
+                    candidate_id == state.get("last_request_id")
+                    or state.get("last_request_id") == "invalid-request"
+                )
+                if request_is_processed:
+                    try:
+                        delete_repository_file(
+                            config,
+                            str(
+                                config.get("log_diagnostic_request_path")
+                                or "diagnostics/log_request.json"
+                            ),
+                            "Clear processed SmartAF log diagnostic "
+                            f"{state.get('last_request_id', 'unknown')}",
+                        )
+                    except Exception as exc:
+                        LOG.warning(
+                            "processed log diagnostic pointer cleanup failed; "
+                            "will retry: %s",
+                            exc,
+                        )
         except Exception:
             LOG.exception("log diagnostic poll failed")
         try:

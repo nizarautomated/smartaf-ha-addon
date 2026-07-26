@@ -170,6 +170,36 @@ def github_contents_url(config: dict[str, Any], path: str) -> str:
     return f"https://api.github.com/repos/{repository}/contents/{path}"
 
 
+def delete_repository_file(
+    config: dict[str, Any],
+    path: str,
+    message: str,
+) -> bool:
+    """Delete one processed queue pointer while preserving its report."""
+    branch = str(config.get("github_branch", "main"))
+    token = str(config.get("github_token", ""))
+    url = github_contents_url(config, path.strip("/"))
+    try:
+        existing = http_json(
+            f"{url}?ref={parse.quote(branch, safe='')}",
+            token,
+        )
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+    sha = existing.get("sha") if isinstance(existing, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise RuntimeError(f"queue pointer has no SHA: {path}")
+    http_json(
+        url,
+        token,
+        method="DELETE",
+        payload={"message": message, "sha": sha, "branch": branch},
+    )
+    return True
+
+
 def fetch_deployment(config: dict[str, Any]) -> dict[str, Any]:
     branch = config["github_branch"]
     path = config["deployment_path"]
@@ -935,6 +965,22 @@ def process_diagnostic_request(
         else {}
     )
     if diagnostic_id == state.get("last_diagnostic_id"):
+        try:
+            delete_repository_file(
+                config,
+                str(
+                    config.get(
+                        "diagnostic_request_path",
+                        "diagnostics/request.json",
+                    )
+                ),
+                f"Clear processed SmartAF diagnostic {diagnostic_id}",
+            )
+        except Exception as exc:
+            LOG.warning(
+                "processed diagnostic pointer cleanup failed; will retry: %s",
+                exc,
+            )
         return
 
     try:
@@ -1002,6 +1048,22 @@ def process_diagnostic_request(
         entity_count,
         report.get("event_count", 0),
     )
+    try:
+        delete_repository_file(
+            config,
+            str(
+                config.get(
+                    "diagnostic_request_path",
+                    "diagnostics/request.json",
+                )
+            ),
+            f"Clear processed SmartAF diagnostic {diagnostic_id}",
+        )
+    except Exception as exc:
+        LOG.warning(
+            "processed diagnostic pointer cleanup failed; will retry: %s",
+            exc,
+        )
 
 
 def fetch_repository_commit_sha(config: dict[str, Any]) -> str:
@@ -1147,10 +1209,25 @@ def finish_deployment(
         },
     )
 
+    status_published = False
     try:
         publish_status(config, deployment_id, result)
+        status_published = True
     except Exception as exc:
         LOG.error("status publish failed for %s: %s", deployment_id, exc)
+
+    if status_published:
+        try:
+            delete_repository_file(
+                config,
+                str(config["deployment_path"]),
+                f"Clear processed SmartAF deployment {deployment_id}",
+            )
+        except Exception as exc:
+            LOG.warning(
+                "processed deployment pointer cleanup failed; will retry: %s",
+                exc,
+            )
 
     LOG.info(
         "deployment=%s status=%s detail=%s",

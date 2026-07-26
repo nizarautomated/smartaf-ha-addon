@@ -165,6 +165,36 @@ def put_github_json(
     http_json(url, token, method="PUT", payload=payload)
 
 
+def delete_repository_file(
+    config: dict[str, Any],
+    path: str,
+    message: str,
+) -> bool:
+    """Delete one processed queue pointer while preserving its report."""
+    branch = str(config.get("github_branch", "main"))
+    token = str(config.get("github_token", ""))
+    url = github_contents_url(config, path.strip("/"))
+    try:
+        existing = http_json(
+            f"{url}?ref={parse.quote(branch, safe='')}",
+            token,
+        )
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+    sha = existing.get("sha") if isinstance(existing, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise RuntimeError(f"queue pointer has no SHA: {path}")
+    http_json(
+        url,
+        token,
+        method="DELETE",
+        payload={"message": message, "sha": sha, "branch": branch},
+    )
+    return True
+
+
 def proposal_status(
     proposal_id: str,
     status: str,
@@ -697,6 +727,25 @@ def main() -> None:
                             state["decision"],
                             state["decision"] == "approved",
                         )
+            if (
+                raw_proposal is not None
+                and state.get("phase") == "completed"
+                and canonical_sha256(raw_proposal)
+                == state.get("last_raw_proposal_sha256")
+            ):
+                try:
+                    delete_repository_file(
+                        config,
+                        PROPOSAL_PATH,
+                        "Clear processed SmartAF proposal "
+                        f"{state.get('proposal_id', 'unknown')}",
+                    )
+                except Exception as exc:
+                    LOG.warning(
+                        "processed proposal pointer cleanup failed; "
+                        "will retry: %s",
+                        exc,
+                    )
         except Exception:
             LOG.exception("approval poll failed")
         try:
