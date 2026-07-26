@@ -498,6 +498,7 @@ def complete_proposal(
     if target_sha256 != state["target_sha256"]:
         raise ValueError("validated target changed before approval")
     deployment = dict(proposal["deployment"])
+    deployment["request_origin"] = "pattern_recognition"
     deployment["approval"] = create_approval_certificate(
         deployment,
         proposal_id,

@@ -49,6 +49,8 @@ INTEGRATION_FILES = (
 
 DIAGNOSTIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ENTITY_ID_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+DEPLOYMENT_ORIGINS = {"user_requested", "pattern_recognition"}
+DEFAULT_DEPLOYMENT_ORIGIN = "user_requested"
 
 ALLOWED_NODE_CHANGES = {
     "name",
@@ -110,6 +112,28 @@ def canonical_sha256(value: Any) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return raw_sha256(canonical)
+
+
+def resolve_deployment_approval(
+    config: dict[str, Any],
+    deployment: dict[str, Any],
+) -> tuple[str, bool]:
+    """Return the bounded origin and whether a certificate is required."""
+    request_origin = deployment.get(
+        "request_origin",
+        DEFAULT_DEPLOYMENT_ORIGIN,
+    )
+    if request_origin not in DEPLOYMENT_ORIGINS:
+        raise ValueError(
+            "request_origin must be user_requested or pattern_recognition"
+        )
+
+    legacy_global_approval = config.get("approval_required", False) is True
+    approval_required = (
+        request_origin == "pattern_recognition"
+        or legacy_global_approval
+    )
+    return request_origin, approval_required
 
 
 def http_json(
@@ -1149,7 +1173,29 @@ def process_deployment(
     if deployment_id == state.get("last_deployment_id"):
         return
 
-    approval_required = config.get("approval_required", True) is not False
+    raw_request_origin = deployment.get(
+        "request_origin",
+        DEFAULT_DEPLOYMENT_ORIGIN,
+    )
+    try:
+        request_origin, approval_required = resolve_deployment_approval(
+            config,
+            deployment,
+        )
+    except ValueError as exc:
+        finish_deployment(
+            config,
+            deployment_id,
+            "rejected",
+            str(exc),
+            {
+                "request_origin": str(raw_request_origin)[:100],
+                "approval_required": False,
+                "approval_verified": False,
+            },
+        )
+        return
+
     approval_info: dict[str, Any] | None = None
     if approval_required:
         try:
@@ -1162,8 +1208,12 @@ def process_deployment(
                 config,
                 deployment_id,
                 "rejected",
-                f"mobile approval required: {exc}",
+                (
+                    f"approval certificate required for "
+                    f"{request_origin}: {exc}"
+                ),
                 {
+                    "request_origin": request_origin,
                     "approval_required": True,
                     "approval_verified": False,
                 },
@@ -1226,6 +1276,7 @@ def process_deployment(
         "source_raw_sha256": source_raw_hash,
         "target_sha256": target_hash,
         "target_raw_sha256": raw_sha256(patched_raw),
+        "request_origin": request_origin,
         "approval_required": approval_required,
         "approval_verified": approval_info is not None,
     }
