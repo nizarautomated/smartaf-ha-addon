@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.13
+
+- Recheck and atomically synchronize the fixed SmartAF custom-integration file allowlist every five minutes, so integration tool updates no longer depend on restarting the Deploy Agent itself.
+- Keep every integration read pinned to one private-repository commit and continue comparing the complete allowlisted-file manifest before replacing local files.
+- Preserve all deployment hash checks, patch validation, backups, restart verification, rollback behavior, command restrictions, flow synchronization, health reporting and retention behavior.
+- Add no configuration fields and keep every existing Home Assistant app configuration valid.
+
 ## 0.6.12
 
 - Treat an omitted Home Assistant Core `state` field as unknown instead of unhealthy when the Supervisor endpoint itself succeeds; still reject every explicit state other than `started` or `running`.
