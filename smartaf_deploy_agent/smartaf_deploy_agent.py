@@ -46,6 +46,7 @@ INTEGRATION_FILES = (
     "translations/nl.json",
     "validation.py",
 )
+INTEGRATION_SYNC_INTERVAL_SECONDS = 300
 
 DIAGNOSTIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ENTITY_ID_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -1166,6 +1167,27 @@ def sync_smartaf_custom_integration(config: dict[str, Any]) -> bool:
     return True
 
 
+def sync_smartaf_custom_integration_with_logging(
+    config: dict[str, Any],
+) -> None:
+    """Synchronize the fixed integration allowlist and report the outcome."""
+    try:
+        if sync_smartaf_custom_integration(config):
+            LOG.info(
+                "SmartAF custom integration synced; target=%s files=%s; "
+                "Home Assistant Core restart required",
+                INTEGRATION_TARGET_ROOT,
+                len(INTEGRATION_FILES),
+            )
+        else:
+            LOG.info(
+                "SmartAF custom integration already current; target=%s",
+                INTEGRATION_TARGET_ROOT,
+            )
+    except Exception as exc:
+        LOG.exception("SmartAF custom integration sync failed: %s", exc)
+
+
 def restart_nodered(config: dict[str, Any]) -> None:
     addon_slug = config["nodered_addon_slug"]
     supervisor_request(f"/addons/{addon_slug}/restart", method="POST")
@@ -1487,23 +1509,18 @@ def main() -> None:
         LOG.error("Home Assistant Core WebSocket check failed: %s", exc)
 
 
-    try:
-        if sync_smartaf_custom_integration(config):
-            LOG.info(
-                "SmartAF custom integration synced; target=%s files=%s; "
-                "Home Assistant Core restart required",
-                INTEGRATION_TARGET_ROOT,
-                len(INTEGRATION_FILES),
-            )
-        else:
-            LOG.info(
-                "SmartAF custom integration already current; target=%s",
-                INTEGRATION_TARGET_ROOT,
-            )
-    except Exception as exc:
-        LOG.exception("SmartAF custom integration sync failed: %s", exc)
+    sync_smartaf_custom_integration_with_logging(config)
+    next_integration_sync = (
+        time.monotonic() + INTEGRATION_SYNC_INTERVAL_SECONDS
+    )
 
     while True:
+        if time.monotonic() >= next_integration_sync:
+            sync_smartaf_custom_integration_with_logging(config)
+            next_integration_sync = (
+                time.monotonic() + INTEGRATION_SYNC_INTERVAL_SECONDS
+            )
+
         try:
             sync_current_flows(config)
         except Exception as exc:
