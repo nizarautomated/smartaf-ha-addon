@@ -50,6 +50,28 @@ INTEGRATION_SYNC_INTERVAL_SECONDS = 300
 
 DIAGNOSTIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ENTITY_ID_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+AUTOMATION_ENTITY_ID_PATTERN = re.compile(r"^automation\.[a-z0-9_]+$")
+MAX_DIAGNOSTIC_EVENTS = 500
+MAX_AUTOMATION_ENTITIES = 10
+MAX_TRACES_PER_AUTOMATION = 5
+MAX_TRACE_STEPS = 500
+MAX_TRACE_COLLECTIONS = 20
+SENSITIVE_TRACE_KEYS = {
+    "access_token",
+    "accesstoken",
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "client_secret",
+    "clientsecret",
+    "credentials",
+    "password",
+    "refresh_token",
+    "refreshtoken",
+    "secret",
+    "token",
+}
 DEPLOYMENT_ORIGINS = {"user_requested", "pattern_recognition"}
 DEFAULT_DEPLOYMENT_ORIGIN = "user_requested"
 
@@ -113,6 +135,123 @@ def canonical_sha256(value: Any) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return raw_sha256(canonical)
+
+
+def bounded_context(value: Any) -> dict[str, str | None] | None:
+    """Return only correlation fields from one Home Assistant context."""
+    if not isinstance(value, dict):
+        return None
+    context = {
+        key: item if isinstance(item, str) else None
+        for key, item in value.items()
+        if key in {"id", "parent_id", "user_id"}
+    }
+    return context or None
+
+
+def parse_iso_datetime(value: Any) -> datetime | None:
+    """Parse one Home Assistant timestamp without accepting other values."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def duration_milliseconds(started_at: Any, finished_at: Any) -> int | None:
+    """Calculate a non-negative bounded duration from two ISO timestamps."""
+    started = parse_iso_datetime(started_at)
+    finished = parse_iso_datetime(finished_at)
+    if started is None or finished is None:
+        return None
+    return max(0, round((finished - started).total_seconds() * 1000))
+
+
+def state_diagnostic_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """Return state, timing and context without exposing attributes."""
+    return {
+        "entity_id": str(state.get("entity_id", "unknown")),
+        "state": str(state.get("state", "unknown")),
+        "last_changed": state.get("last_changed"),
+        "last_updated": state.get("last_updated"),
+        "context": bounded_context(state.get("context")),
+    }
+
+
+def sanitize_trace_value(value: Any, depth: int = 0) -> Any:
+    """Bound and redact trace result data before publishing a report."""
+    if depth >= 8:
+        return "[truncated]"
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 100:
+                sanitized["_truncated"] = True
+                break
+            normalized_key = key.casefold().replace("-", "_")
+            if normalized_key in SENSITIVE_TRACE_KEYS:
+                sanitized[key] = "[redacted]"
+            elif normalized_key in {
+                "variables",
+                "changed_variables",
+                "config",
+                "blueprint_inputs",
+            }:
+                sanitized[key] = "[omitted]"
+            else:
+                sanitized[key] = sanitize_trace_value(item, depth + 1)
+        return sanitized
+    if isinstance(value, list):
+        result = [sanitize_trace_value(item, depth + 1) for item in value[:100]]
+        if len(value) > 100:
+            result.append("[truncated]")
+        return result
+    if isinstance(value, str):
+        return value if len(value) <= 2000 else f"{value[:2000]}[truncated]"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:2000]
+
+
+def summarize_trace_steps(
+    trace_data: Any,
+    remaining_steps: int,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Flatten a bounded set of automation trace steps."""
+    if not isinstance(trace_data, dict):
+        return [], 0, 0
+    total = sum(
+        len(entries)
+        for entries in trace_data.values()
+        if isinstance(entries, list)
+    )
+    if remaining_steps <= 0:
+        return [], total, total
+    steps: list[dict[str, Any]] = []
+    for path, entries in trace_data.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if len(steps) >= remaining_steps:
+                break
+            if not isinstance(entry, dict):
+                continue
+            step: dict[str, Any] = {
+                "path": str(path),
+                "timestamp": entry.get("timestamp"),
+            }
+            if "error" in entry:
+                step["error"] = sanitize_trace_value(entry.get("error"))
+            if "result" in entry:
+                step["result"] = sanitize_trace_value(entry.get("result"))
+            steps.append(step)
+        if len(steps) >= remaining_steps:
+            break
+    return steps, total, max(0, total - len(steps))
 
 
 def resolve_deployment_approval(
@@ -734,7 +873,7 @@ def publish_diagnostic_report(
 def validate_diagnostic_request(
     config: dict[str, Any],
     diagnostic: dict[str, Any],
-) -> tuple[str, list[str], int]:
+) -> tuple[str, list[str], int, list[str], int]:
     diagnostic_id = diagnostic.get("diagnostic_id")
     if (
         not isinstance(diagnostic_id, str)
@@ -780,7 +919,37 @@ def validate_diagnostic_request(
             f"duration_seconds must be between 10 and {maximum_duration}"
         )
 
-    return diagnostic_id, entity_ids, duration_seconds
+    automation_entity_ids = diagnostic.get("automation_entity_ids", [])
+    if (
+        not isinstance(automation_entity_ids, list)
+        or len(automation_entity_ids) > MAX_AUTOMATION_ENTITIES
+        or any(
+            not isinstance(entity_id, str)
+            or not AUTOMATION_ENTITY_ID_PATTERN.fullmatch(entity_id)
+            for entity_id in automation_entity_ids
+        )
+    ):
+        raise ValueError(
+            "automation_entity_ids must contain at most 10 automation entities"
+        )
+    if len(automation_entity_ids) != len(set(automation_entity_ids)):
+        raise ValueError("automation_entity_ids must be unique")
+
+    traces_per_automation = diagnostic.get("traces_per_automation", 3)
+    if (
+        isinstance(traces_per_automation, bool)
+        or not isinstance(traces_per_automation, int)
+        or not 1 <= traces_per_automation <= MAX_TRACES_PER_AUTOMATION
+    ):
+        raise ValueError("traces_per_automation must be between 1 and 5")
+
+    return (
+        diagnostic_id,
+        entity_ids,
+        duration_seconds,
+        automation_entity_ids,
+        traces_per_automation,
+    )
 
 
 def homeassistant_entity_state(entity_id: str) -> dict[str, Any]:
@@ -794,24 +963,204 @@ def homeassistant_entity_state(entity_id: str) -> dict[str, Any]:
     )
 
 
+def authenticated_homeassistant_websocket():
+    """Open one authenticated read-only Home Assistant WebSocket session."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise RuntimeError("SUPERVISOR_TOKEN missing")
+    websocket = create_connection(
+        "ws://supervisor/core/websocket",
+        timeout=10,
+        http_no_proxy=["supervisor"],
+    )
+    try:
+        challenge = json.loads(websocket.recv())
+        if challenge.get("type") != "auth_required":
+            raise RuntimeError("WebSocket did not request authentication")
+        websocket.send(
+            json.dumps({"type": "auth", "access_token": token})
+        )
+        authenticated = json.loads(websocket.recv())
+        if authenticated.get("type") != "auth_ok":
+            raise RuntimeError("WebSocket authentication failed")
+        return websocket
+    except Exception:
+        websocket.close()
+        raise
+
+
+def homeassistant_websocket_result(
+    websocket,
+    command_id: int,
+    command: dict[str, Any],
+) -> Any:
+    """Execute one bounded read-only WebSocket command and return its result."""
+    websocket.send(json.dumps({"id": command_id, **command}))
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        websocket.settimeout(max(0.1, deadline - time.monotonic()))
+        try:
+            response = json.loads(websocket.recv())
+        except WebSocketTimeoutException:
+            continue
+        if response.get("id") != command_id:
+            continue
+        if response.get("type") != "result":
+            raise RuntimeError("unexpected Home Assistant WebSocket response")
+        if response.get("success") is not True:
+            error_value = response.get("error")
+            raise RuntimeError(
+                "Home Assistant WebSocket command failed: "
+                f"{sanitize_trace_value(error_value)}"
+            )
+        return response.get("result")
+    raise RuntimeError("Home Assistant WebSocket command timed out")
+
+
+def trace_timestamp_fields(trace: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Home Assistant's trace timing representation."""
+    timestamp = trace.get("timestamp")
+    if isinstance(timestamp, dict):
+        started_at = timestamp.get("start")
+        finished_at = timestamp.get("finish")
+    else:
+        started_at = timestamp
+        finished_at = trace.get("finished_at")
+    return {
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_ms": duration_milliseconds(started_at, finished_at),
+    }
+
+
+def collect_automation_traces(
+    automation_entity_ids: list[str],
+    traces_per_automation: int,
+) -> dict[str, Any]:
+    """Read a bounded set of recent automation traces and correlation data."""
+    resolved: list[tuple[str, str]] = []
+    missing: list[str] = []
+    unresolved: list[str] = []
+    for entity_id in automation_entity_ids:
+        try:
+            state = homeassistant_entity_state(entity_id)
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            missing.append(entity_id)
+            continue
+        attributes = state.get("attributes")
+        item_id = attributes.get("id") if isinstance(attributes, dict) else None
+        if not isinstance(item_id, str) or not item_id or len(item_id) > 255:
+            unresolved.append(entity_id)
+            continue
+        resolved.append((entity_id, item_id))
+
+    traces: list[dict[str, Any]] = []
+    dropped_trace_count = 0
+    dropped_step_count = 0
+    step_count = 0
+    if resolved:
+        websocket = authenticated_homeassistant_websocket()
+        command_id = 100
+        try:
+            for entity_id, item_id in resolved:
+                summaries = homeassistant_websocket_result(
+                    websocket,
+                    command_id,
+                    {
+                        "type": "trace/list",
+                        "domain": "automation",
+                        "item_id": item_id,
+                    },
+                )
+                command_id += 1
+                if not isinstance(summaries, list):
+                    raise RuntimeError("trace/list returned an invalid result")
+                selected = summaries[-traces_per_automation:]
+                dropped_trace_count += max(0, len(summaries) - len(selected))
+                for summary in selected:
+                    if len(traces) >= MAX_TRACE_COLLECTIONS:
+                        dropped_trace_count += 1
+                        continue
+                    if not isinstance(summary, dict):
+                        continue
+                    run_id = summary.get("run_id")
+                    if not isinstance(run_id, str) or not run_id:
+                        continue
+                    full_trace = homeassistant_websocket_result(
+                        websocket,
+                        command_id,
+                        {
+                            "type": "trace/get",
+                            "domain": "automation",
+                            "item_id": item_id,
+                            "run_id": run_id,
+                        },
+                    )
+                    command_id += 1
+                    if not isinstance(full_trace, dict):
+                        raise RuntimeError("trace/get returned an invalid result")
+                    remaining_steps = max(0, MAX_TRACE_STEPS - step_count)
+                    steps, total_steps, dropped_steps = summarize_trace_steps(
+                        full_trace.get("trace"),
+                        remaining_steps,
+                    )
+                    step_count += len(steps)
+                    dropped_step_count += dropped_steps
+                    source = {**summary, **full_trace}
+                    trace_report: dict[str, Any] = {
+                        "automation_entity_id": entity_id,
+                        "item_id": item_id,
+                        "run_id": run_id,
+                        "state": source.get("state"),
+                        "script_execution": source.get("script_execution"),
+                        "last_step": source.get("last_step"),
+                        "trigger": sanitize_trace_value(source.get("trigger")),
+                        "error": sanitize_trace_value(source.get("error")),
+                        "context": bounded_context(source.get("context")),
+                        "timing": trace_timestamp_fields(source),
+                        "steps": steps,
+                        "step_count": total_steps,
+                        "dropped_step_count": dropped_steps,
+                    }
+                    traces.append(trace_report)
+        finally:
+            websocket.close()
+
+    return {
+        "status": "complete",
+        "requested_automation_entity_ids": automation_entity_ids,
+        "resolved_automation_item_ids": [
+            {"entity_id": entity_id, "item_id": item_id}
+            for entity_id, item_id in resolved
+        ],
+        "missing_automation_entity_ids": missing,
+        "unresolved_automation_entity_ids": unresolved,
+        "traces": traces,
+        "trace_count": len(traces) + dropped_trace_count,
+        "dropped_trace_count": dropped_trace_count,
+        "trace_step_count": step_count + dropped_step_count,
+        "dropped_trace_step_count": dropped_step_count,
+    }
+
+
 def run_bounded_entity_diagnostic(
     diagnostic_id: str,
     entity_ids: list[str],
     duration_seconds: int,
+    automation_entity_ids: list[str],
+    traces_per_automation: int,
 ) -> dict[str, Any]:
     started_at = utc_now()
-    initial_states: list[dict[str, str]] = []
+    started_monotonic = time.monotonic()
+    initial_states: list[dict[str, Any]] = []
     missing_entities: list[str] = []
 
     for entity_id in entity_ids:
         try:
             state = homeassistant_entity_state(entity_id)
-            initial_states.append(
-                {
-                    "entity_id": entity_id,
-                    "state": str(state.get("state", "unknown")),
-                }
-            )
+            initial_states.append(state_diagnostic_summary(state))
         except error.HTTPError as exc:
             if exc.code != 404:
                 raise
@@ -824,6 +1173,7 @@ def run_bounded_entity_diagnostic(
     ]
     events: list[dict[str, Any]] = []
     dropped_event_count = 0
+    previous_event_monotonic: float | None = None
 
     if monitored_entity_ids:
         token = os.environ.get("SUPERVISOR_TOKEN")
@@ -916,6 +1266,8 @@ def run_bounded_entity_diagnostic(
                 if old_state == new_state:
                     continue
 
+                observed_monotonic = time.monotonic()
+                observed_at = utc_now()
                 event = {
                     "entity_id": entity_id,
                     "old_state": old_state,
@@ -923,32 +1275,94 @@ def run_bounded_entity_diagnostic(
                     "occurred_at": (
                         to_state.get("last_changed")
                         or to_state.get("last_updated")
-                        or utc_now()
+                        or observed_at
                     ),
+                    "state_changed_at": to_state.get("last_changed"),
+                    "state_updated_at": to_state.get("last_updated"),
+                    "observed_at": observed_at,
+                    "elapsed_ms": round(
+                        (observed_monotonic - started_monotonic) * 1000
+                    ),
+                    "delta_from_previous_event_ms": (
+                        None
+                        if previous_event_monotonic is None
+                        else round(
+                            (
+                                observed_monotonic
+                                - previous_event_monotonic
+                            )
+                            * 1000
+                        )
+                    ),
+                    "context": bounded_context(to_state.get("context")),
                 }
-                if len(events) < 500:
+                previous_event_monotonic = observed_monotonic
+                if len(events) < MAX_DIAGNOSTIC_EVENTS:
                     events.append(event)
                 else:
                     dropped_event_count += 1
         finally:
             websocket.close()
 
+    final_states: list[dict[str, Any]] = []
+    for entity_id in monitored_entity_ids:
+        try:
+            final_states.append(
+                state_diagnostic_summary(
+                    homeassistant_entity_state(entity_id)
+                )
+            )
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+
+    try:
+        trace_report = collect_automation_traces(
+            automation_entity_ids,
+            traces_per_automation,
+        )
+    except Exception as exc:
+        LOG.warning(
+            "diagnostic=%s automation trace collection failed: %s",
+            diagnostic_id,
+            type(exc).__name__,
+        )
+        trace_report = {
+            "status": "failed",
+            "detail": "automation trace collection failed",
+            "error_type": type(exc).__name__,
+            "requested_automation_entity_ids": automation_entity_ids,
+            "traces": [],
+            "trace_count": 0,
+            "dropped_trace_count": 0,
+            "trace_step_count": 0,
+            "dropped_trace_step_count": 0,
+        }
+    finished_at = utc_now()
+
     return {
         "diagnostic_id": diagnostic_id,
         "status": "complete",
         "started_at": started_at,
-        "finished_at": utc_now(),
+        "finished_at": finished_at,
         "duration_seconds": duration_seconds,
+        "actual_duration_ms": duration_milliseconds(started_at, finished_at),
         "requested_entity_ids": entity_ids,
         "missing_entity_ids": missing_entities,
         "initial_states": initial_states,
+        "final_states": final_states,
         "events": events,
         "event_count": len(events) + dropped_event_count,
         "dropped_event_count": dropped_event_count,
+        "automation_diagnostics": trace_report,
         "sanitization": {
             "attributes_included": False,
-            "context_included": False,
+            "context_included": True,
             "other_entities_included": False,
+            "automation_trace_config_included": False,
+            "automation_trace_variables_included": False,
+            "credentials_included": False,
+            "sensitive_trace_values_redacted": True,
         },
     }
 
@@ -991,10 +1405,13 @@ def process_diagnostic_request(
         return
 
     try:
-        _, entity_ids, duration_seconds = validate_diagnostic_request(
-            config,
-            diagnostic,
-        )
+        (
+            _,
+            entity_ids,
+            duration_seconds,
+            automation_entity_ids,
+            traces_per_automation,
+        ) = validate_diagnostic_request(config, diagnostic)
     except ValueError as exc:
         report = {
             "diagnostic_id": diagnostic_id,
@@ -1016,6 +1433,8 @@ def process_diagnostic_request(
                 diagnostic_id,
                 entity_ids,
                 duration_seconds,
+                automation_entity_ids,
+                traces_per_automation,
             )
         except Exception as exc:
             LOG.exception("diagnostic %s failed", diagnostic_id)
@@ -1026,6 +1445,7 @@ def process_diagnostic_request(
                 "finished_at": utc_now(),
                 "duration_seconds": duration_seconds,
                 "requested_entity_ids": entity_ids,
+                "requested_automation_entity_ids": automation_entity_ids,
                 "detail": str(exc),
                 "sanitization": {
                     "attributes_included": False,
@@ -1049,11 +1469,12 @@ def process_diagnostic_request(
         },
     )
     LOG.info(
-        "diagnostic=%s status=%s entities=%s events=%s",
+        "diagnostic=%s status=%s entities=%s events=%s traces=%s",
         diagnostic_id,
         report["status"],
         entity_count,
         report.get("event_count", 0),
+        report.get("automation_diagnostics", {}).get("trace_count", 0),
     )
     try:
         delete_repository_file(

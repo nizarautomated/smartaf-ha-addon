@@ -34,6 +34,21 @@ Vul het token in bij `github_token`. Laat de overige waarden ongewijzigd,
 tenzij het Node-RED app-ID of het pad naar `flows.json` op jouw installatie
 anders is.
 
+## Read-only diagnostiek
+
+De bestaande entity-diagnostiek bewaakt uitsluitend expliciet aangevraagde
+entiteiten, maximaal 10 tegelijk en maximaal 120 seconden. Een request kan nu
+optioneel maximaal 10 expliciete `automation.*`-entiteiten bevatten. De agent
+resolveert hun interne trace-ID en leest maximaal vijf recente traces per
+automation via Home Assistant `trace/list` en `trace/get`.
+
+Rapporten bevatten begin- en eindstatus, state-overgangen, contextcorrelatie,
+milliseconde-timing en maximaal 500 gesaniteerde trace-stappen. Attributes,
+traceconfiguratie, tracevariabelen en credentials worden niet gepubliceerd.
+De diagnostiek doet geen servicecalls en schrijft geen Home Assistant-state.
+Wanneer de trace-API niet beschikbaar is, blijft het state-deel van het rapport
+bruikbaar en wordt de tracecollectie afzonderlijk als mislukt gemarkeerd.
+
 ## Centrale healthstatus
 
 De aparte maintenance-runner controleert Home Assistant Core, Supervisor,
