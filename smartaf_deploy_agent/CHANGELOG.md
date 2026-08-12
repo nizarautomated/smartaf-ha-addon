@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.14
+
+- Extend the existing bounded entity diagnostic with optional recent automation traces, Home Assistant context correlation and millisecond event timing.
+- Resolve trace item IDs only from explicitly requested `automation.*` entities and use Home Assistant's read-only `trace/list` and `trace/get` WebSocket commands.
+- Keep state attributes, trace configuration, trace variables and credentials out of reports; redact sensitive trace-result keys and cap reports at 500 state events, 20 traces and 500 trace steps.
+- Preserve state diagnostics when trace collection is unavailable, keep all existing requests valid, add no configuration fields and make no Home Assistant service calls or state writes.
+
 ## 0.6.13
 
 - Recheck and atomically synchronize the fixed SmartAF custom-integration file allowlist every five minutes, so integration tool updates no longer depend on restarting the Deploy Agent itself.
@@ -166,4 +173,3 @@
 ## 0.1.0
 
 - Initial SmartAF Node-RED Deploy Agent release.
-
