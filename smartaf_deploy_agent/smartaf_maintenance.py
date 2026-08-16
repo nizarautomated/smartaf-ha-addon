@@ -678,6 +678,7 @@ def build_health(
     config: dict[str, Any],
     retention: dict[str, Any],
 ) -> dict[str, Any]:
+    server_only_mode = config.get("server_only_mode", False) is True
     components = {
         "supervisor": checked_component(supervisor_health),
         "home_assistant_core": checked_component(core_health),
@@ -690,7 +691,22 @@ def build_health(
         ),
         "smartaf_integration": checked_component(integration_health),
     }
+    if server_only_mode:
+        components["smartaf_local_agent"] = checked_component(
+            lambda: addon_health(str(config.get("local_agent_slug", "")))
+        )
     core_state = components["home_assistant_core"].get("state")
+    node_red_state = components["node_red"].get("state")
+    node_red_ready = (
+        node_red_state == "stopped"
+        if server_only_mode
+        else node_red_state in {"started", "running"}
+    )
+    local_agent_ready = (
+        not server_only_mode
+        or components["smartaf_local_agent"].get("state")
+        in {"started", "running"}
+    )
     operational = (
         all(component["status"] == "ok" for component in components.values())
         and components["supervisor"].get("healthy") is True
@@ -701,7 +717,8 @@ def build_health(
         )
         and components["smartaf_deploy_agent"].get("state")
         in {"started", "running"}
-        and components["node_red"].get("state") in {"started", "running"}
+        and node_red_ready
+        and local_agent_ready
         and components["node_red_flows"].get("baseline_in_sync") is True
     )
     status = "healthy" if operational else "degraded"
@@ -758,6 +775,10 @@ def build_health(
         "retention": retention,
         "safety": {
             "health_checks_read_only": True,
+            "server_only_mode": server_only_mode,
+            "expected_local_node_red_state": (
+                "stopped" if server_only_mode else "started"
+            ),
             "automatic_pattern_recognition_runner_present": False,
             "credentials_included": False,
             "arbitrary_paths_allowed": False,

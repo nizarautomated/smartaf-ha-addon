@@ -30,6 +30,9 @@ jobs:
           npm test
           find src -name '*.mjs' -print0 | xargs -0 -n1 node --check
 
+      - name: Test Deploy Agent
+        run: python3 -m unittest discover -s smartaf_deploy_agent/tests -p 'test_*.py' -v
+
       - name: Build Local Agent amd64 image
         run: |
           version="$(ruby -e "require 'yaml'; print YAML.safe_load_file('smartaf_local_agent/config.yaml')['version']")"
