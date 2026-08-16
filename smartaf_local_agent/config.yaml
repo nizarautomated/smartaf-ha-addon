@@ -1,0 +1,32 @@
+name: SmartAF Local Agent
+version: "0.1.0"
+slug: smartaf_local_agent
+description: Verbindt Home Assistant veilig met de centrale SmartAF-automationserver zonder lokale beslislogica.
+url: https://github.com/nizarautomated/smartaf-ha-addon
+startup: services
+boot: auto
+init: false
+stage: experimental
+arch:
+  - aarch64
+  - amd64
+  - armv7
+homeassistant_api: true
+options:
+  home_id: home_green_test_001
+  agent_id: agent_green_test_001
+  control_plane_url: https://api.135-125-237-15.sslip.io
+  agent_token: ""
+  allowed_services: button.press,climate.set_temperature,cover.close_cover,cover.open_cover,cover.set_cover_position,homeassistant.turn_off,input_boolean.toggle,input_boolean.turn_off,input_boolean.turn_on,light.toggle,light.turn_off,light.turn_on,media_player.media_pause,media_player.media_play,media_player.media_stop,media_player.play_media,media_player.turn_off,media_player.turn_on,media_player.volume_set,notify.send_message,remote.turn_off,remote.turn_on,scene.create,scene.turn_on,switch.toggle,switch.turn_off,switch.turn_on,vacuum.return_to_base,vacuum.start
+  poll_interval_ms: 500
+  heartbeat_interval_ms: 30000
+  event_queue_limit: 5000
+schema:
+  home_id: "match(^home_[a-z0-9][a-z0-9_]{2,47}$)"
+  agent_id: "match(^agent_[a-z0-9_]{3,64}$)"
+  control_plane_url: url
+  agent_token: password
+  allowed_services: str
+  poll_interval_ms: int(100,60000)
+  heartbeat_interval_ms: int(5000,300000)
+  event_queue_limit: int(100,100000)

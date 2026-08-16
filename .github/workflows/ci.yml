@@ -1,0 +1,36 @@
+name: SmartAF apps CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate repository and app configuration
+        run: |
+          ruby -e "require 'yaml'; Dir.glob('**/*.{yaml,yml}').each { |path| YAML.safe_load_file(path, aliases: true) }; puts 'YAML valid'"
+          test "$(ruby -e "require 'yaml'; print YAML.safe_load_file('smartaf_local_agent/config.yaml')['version']")" != ""
+
+      - name: Test Local Agent
+        working-directory: smartaf_local_agent
+        run: |
+          npm test
+          find src -name '*.mjs' -print0 | xargs -0 -n1 node --check
+
+      - name: Build Local Agent amd64 image
+        run: |
+          version="$(ruby -e "require 'yaml'; print YAML.safe_load_file('smartaf_local_agent/config.yaml')['version']")"
+          docker build --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$version" --tag smartaf/local-agent-app:ci smartaf_local_agent
