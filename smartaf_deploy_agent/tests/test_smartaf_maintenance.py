@@ -216,6 +216,111 @@ class MaintenanceTests(unittest.TestCase):
             )
         self.assertEqual("degraded", health["overall_status"])
 
+    def test_server_only_mode_requires_stopped_node_red_and_started_agent(
+        self,
+    ) -> None:
+        config = {
+            "nodered_addon_slug": "node_red",
+            "local_agent_slug": "smartaf_local_agent",
+            "server_only_mode": True,
+            "flows_path": "/flows.json",
+        }
+
+        def addon_status(slug: str) -> dict[str, str]:
+            return {
+                "state": (
+                    "stopped" if slug == "node_red" else "started"
+                )
+            }
+
+        with (
+            patch.object(
+                maintenance,
+                "supervisor_health",
+                return_value={"healthy": True, "supported": True},
+            ),
+            patch.object(
+                maintenance,
+                "core_health",
+                return_value={"state": "started"},
+            ),
+            patch.object(
+                maintenance,
+                "self_health",
+                return_value={"state": "started"},
+            ),
+            patch.object(
+                maintenance,
+                "addon_health",
+                side_effect=addon_status,
+            ),
+            patch.object(
+                maintenance,
+                "flow_health",
+                return_value={"baseline_in_sync": True},
+            ),
+            patch.object(
+                maintenance,
+                "integration_health",
+                return_value={"version": "0.5.1"},
+            ),
+        ):
+            health = maintenance.build_health(
+                config,
+                {"enabled": False},
+            )
+        self.assertEqual("healthy", health["overall_status"])
+        self.assertTrue(health["safety"]["server_only_mode"])
+
+    def test_server_only_mode_rejects_stopped_local_agent(self) -> None:
+        config = {
+            "nodered_addon_slug": "node_red",
+            "local_agent_slug": "smartaf_local_agent",
+            "server_only_mode": True,
+            "flows_path": "/flows.json",
+        }
+
+        with (
+            patch.object(
+                maintenance,
+                "supervisor_health",
+                return_value={"healthy": True, "supported": True},
+            ),
+            patch.object(
+                maintenance,
+                "core_health",
+                return_value={"state": "started"},
+            ),
+            patch.object(
+                maintenance,
+                "self_health",
+                return_value={"state": "started"},
+            ),
+            patch.object(
+                maintenance,
+                "addon_health",
+                side_effect=(
+                    {"state": "stopped"},
+                    {"state": "stopped"},
+                ),
+            ),
+            patch.object(
+                maintenance,
+                "flow_health",
+                return_value={"baseline_in_sync": True},
+            ),
+            patch.object(
+                maintenance,
+                "integration_health",
+                return_value={"version": "0.5.1"},
+            ),
+        ):
+            health = maintenance.build_health(
+                config,
+                {"enabled": False},
+            )
+        self.assertEqual("degraded", health["overall_status"])
+
     def test_retention_failure_before_commit_never_deletes(self) -> None:
         now = datetime(2026, 7, 26, tzinfo=timezone.utc)
         config = {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.15
+
+- Add an optional server-only health mode in which the intentionally stopped local Node-RED app is treated as the safe fallback state instead of a failure.
+- Require the transport-only SmartAF Local Agent to be started when server-only health mode is enabled.
+- Keep the existing local Node-RED health contract unchanged unless server-only mode is explicitly enabled.
+- Keep both new configuration fields optional so every existing Home Assistant app configuration remains valid and updateable.
+
 ## 0.6.14
 
 - Extend the existing bounded entity diagnostic with optional recent automation traces, Home Assistant context correlation and millisecond event timing.

@@ -61,6 +61,11 @@ ongewijzigde status krijgt standaard iedere zes uur een heartbeat.
 De healthchecks zijn read-only. Ze schrijven niet naar Home Assistant,
 Node-RED of de flowgraph en voeren geen patroonherkenning uit.
 
+Bij een volledig servergestuurde woning kan `server_only_mode` optioneel worden
+ingeschakeld en wordt `local_agent_slug` ingesteld. Health vereist dan juist
+dat lokale Node-RED gestopt is en de transport-only Local Agent gestart is.
+Zonder deze instelling blijft het bestaande healthcontract ongewijzigd.
+
 ## Rapportretentie
 
 Historische deployment-, voorstel-, diagnose-, logdiagnose- en
