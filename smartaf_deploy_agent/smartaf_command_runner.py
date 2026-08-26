@@ -48,9 +48,8 @@ TARGET_COMMANDS = {
     "addon_restart",
     "addon_update",
 }
-MUTATING_ADDON_COMMANDS = {
+SELF_FORBIDDEN_ADDON_COMMANDS = {
     "addon_start",
-    "addon_restart",
     "addon_update",
 }
 MAX_REQUEST_TTL_SECONDS = 180
@@ -487,8 +486,10 @@ def execute_command(command: str, target: str | None) -> dict[str, Any]:
 
     if target is None or target not in installed_addon_slugs():
         raise ValueError("target is not an installed add-on")
-    if command in MUTATING_ADDON_COMMANDS and target == self_addon_slug():
-        raise ValueError("the command runner cannot mutate its own add-on")
+    if command in SELF_FORBIDDEN_ADDON_COMMANDS and target == self_addon_slug():
+        raise ValueError(
+            "the command runner cannot start or update its own add-on"
+        )
     encoded_target = parse.quote(target, safe="")
     if command == "addon_info":
         return select_fields(

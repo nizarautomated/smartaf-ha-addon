@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.16
+
+- Allow the signed, allowlisted `addon_restart` command to restart the SmartAF Deploy Agent itself.
+- Continue rejecting self-start and self-update commands, free-form shell input, arbitrary targets and every non-allowlisted command.
+- Add regression tests for self-restart and the remaining self-mutation restrictions.
+- Add no configuration fields and keep every existing Home Assistant app configuration valid.
+
 ## 0.6.15
 
 - Add an optional server-only health mode in which the intentionally stopped local Node-RED app is treated as the safe fallback state instead of a failure.
