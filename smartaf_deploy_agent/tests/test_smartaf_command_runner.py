@@ -52,7 +52,7 @@ class CommandRunnerSelfMutationTests(unittest.TestCase):
     @patch.object(command_runner, "supervisor_request")
     @patch.object(command_runner, "self_addon_slug")
     @patch.object(command_runner, "installed_addon_slugs")
-    def test_self_start_and_update_remain_forbidden(
+    def test_self_update_is_allowed(
         self,
         installed_addon_slugs,
         self_addon_slug,
@@ -61,16 +61,44 @@ class CommandRunnerSelfMutationTests(unittest.TestCase):
         installed_addon_slugs.return_value = {"smartaf_nodered_deploy"}
         self_addon_slug.return_value = "smartaf_nodered_deploy"
 
-        for command in ("addon_start", "addon_update"):
-            with self.subTest(command=command):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "cannot start or update its own add-on",
-                ):
-                    command_runner.execute_command(
-                        command,
-                        "smartaf_nodered_deploy",
-                    )
+        result = command_runner.execute_command(
+            "addon_update",
+            "smartaf_nodered_deploy",
+        )
+
+        self.assertEqual(
+            {
+                "detail": "add-on update accepted",
+                "target": "smartaf_nodered_deploy",
+            },
+            result,
+        )
+        supervisor_request.assert_called_once_with(
+            "/store/addons/smartaf_nodered_deploy/update",
+            method="POST",
+            timeout=120,
+        )
+
+    @patch.object(command_runner, "supervisor_request")
+    @patch.object(command_runner, "self_addon_slug")
+    @patch.object(command_runner, "installed_addon_slugs")
+    def test_self_start_remains_forbidden(
+        self,
+        installed_addon_slugs,
+        self_addon_slug,
+        supervisor_request,
+    ) -> None:
+        installed_addon_slugs.return_value = {"smartaf_nodered_deploy"}
+        self_addon_slug.return_value = "smartaf_nodered_deploy"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot start its own add-on",
+        ):
+            command_runner.execute_command(
+                "addon_start",
+                "smartaf_nodered_deploy",
+            )
 
         self.assertEqual([], supervisor_request.call_args_list)
 

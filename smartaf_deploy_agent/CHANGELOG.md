@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.18
+
+- Allow the signed, allowlisted `addon_update` command to update the SmartAF Deploy Agent itself.
+- Keep self-start forbidden and continue requiring an exact installed add-on slug and a valid request signature.
+- Preserve the fixed command allowlist and continue rejecting free-form shell input, arbitrary targets and arbitrary HTTP requests.
+- Add regression tests for allowed self-update and the remaining self-start restriction.
+
 ## 0.6.17
 
 - Apply the configured Node-RED restart timeout to the Supervisor restart request itself instead of keeping an unrelated 30-second HTTP limit.
