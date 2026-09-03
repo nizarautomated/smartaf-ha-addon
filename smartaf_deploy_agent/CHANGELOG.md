@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.17
+
+- Apply the configured Node-RED restart timeout to the Supervisor restart request itself instead of keeping an unrelated 30-second HTTP limit.
+- Prevent successful Node-RED restarts that take slightly longer than 30 seconds from being misclassified as failures and rolled back.
+- Keep ordinary Supervisor and GitHub requests on the existing 30-second timeout and preserve all deployment validation, backup and rollback behavior.
+- Add regression tests for the configured restart timeout and the default request timeout.
+
 ## 0.6.16
 
 - Allow the signed, allowlisted `addon_restart` command to restart the SmartAF Deploy Agent itself.

@@ -281,6 +281,7 @@ def http_json(
     token: str | None = None,
     method: str = "GET",
     payload: dict[str, Any] | None = None,
+    timeout: int = 30,
 ) -> dict[str, Any]:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -300,7 +301,7 @@ def http_json(
         headers=headers,
         method=method,
     )
-    with request.urlopen(http_request, timeout=30) as response:
+    with request.urlopen(http_request, timeout=timeout) as response:
         raw = response.read()
         return json.loads(raw.decode("utf-8")) if raw else {}
 
@@ -563,6 +564,7 @@ def apply_operations(
 def supervisor_request(
     suffix: str,
     method: str = "GET",
+    timeout: int = 30,
 ) -> dict[str, Any]:
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -571,6 +573,7 @@ def supervisor_request(
         f"http://supervisor{suffix}",
         token=token,
         method=method,
+        timeout=timeout,
     )
 
 
@@ -1611,9 +1614,14 @@ def sync_smartaf_custom_integration_with_logging(
 
 def restart_nodered(config: dict[str, Any]) -> None:
     addon_slug = config["nodered_addon_slug"]
-    supervisor_request(f"/addons/{addon_slug}/restart", method="POST")
+    restart_timeout = int(config["restart_timeout_seconds"])
+    supervisor_request(
+        f"/addons/{addon_slug}/restart",
+        method="POST",
+        timeout=restart_timeout,
+    )
 
-    deadline = time.time() + int(config["restart_timeout_seconds"])
+    deadline = time.time() + restart_timeout
     consecutive_started = 0
 
     while time.time() < deadline:
