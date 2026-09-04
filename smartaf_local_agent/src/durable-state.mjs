@@ -60,14 +60,24 @@ export class DurableAgentState {
   }
 
   async firstEvent() {
+    return (await this.firstEvents(1))[0] || null;
+  }
+
+  async firstEvents(limit = 1) {
+    if (!Number.isInteger(limit) || limit < 1) throw new Error("Eventlimiet moet een positief geheel getal zijn");
     await this.lock.catch(() => {});
-    return this.state.events[0] ? structuredClone(this.state.events[0]) : null;
+    return structuredClone(this.state.events.slice(0, limit));
   }
 
   removeEvent(eventId) {
+    return this.removeEvents([eventId]);
+  }
+
+  removeEvents(eventIds) {
+    if (!Array.isArray(eventIds)) throw new Error("Event-ID's moeten een lijst zijn");
+    const ids = new Set(eventIds);
     return this.#mutate((state) => {
-      if (state.events[0]?.event_id === eventId) state.events.shift();
-      else state.events = state.events.filter((event) => event.event_id !== eventId);
+      state.events = state.events.filter((event) => !ids.has(event.event_id));
       return state.events.length;
     });
   }
