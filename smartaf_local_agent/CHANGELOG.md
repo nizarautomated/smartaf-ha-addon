@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Drain durable event backlogs in bounded batches instead of rewriting the full queue after every acknowledgement.
+- Pause Home Assistant subscriptions after a full-buffer signal until half of the durable queue has drained, preventing live events from immediately refilling the backlog.
+- Keep event ordering, restart replay, sequence protection, the existing configuration schema and the transport-only responsibility unchanged.
+
 ## 0.1.0
 
 - Introduce the SmartAF Local Agent as a transport-only Home Assistant app.
