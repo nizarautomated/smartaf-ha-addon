@@ -1,5 +1,5 @@
 name: SmartAF Local Agent
-version: "0.1.0"
+version: "0.1.1"
 slug: smartaf_local_agent
 description: Verbindt Home Assistant veilig met de centrale SmartAF-automationserver zonder lokale beslislogica.
 url: https://github.com/nizarautomated/smartaf-ha-addon

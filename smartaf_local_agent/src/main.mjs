@@ -5,6 +5,10 @@ import { acknowledgement, eventFromHomeAssistant, serviceCallFromCommand, stateS
 import { SmartAFServerClient } from "./server-client.mjs";
 
 const config = loadConfig();
+// This stays below the server's completed-event replay window (256). A crash
+// before the batch checkpoint can therefore only replay safely cached events.
+const EVENT_FLUSH_BATCH_SIZE = 100;
+const EVENT_BUFFER_RESUME_RATIO = 0.5;
 const state = await new DurableAgentState({ dataDir: config.dataDir, eventQueueLimit: config.eventQueueLimit }).init();
 const server = new SmartAFServerClient({
   baseUrl: config.controlPlaneUrl,
@@ -18,6 +22,7 @@ let ha = null;
 let reconnectMs = config.reconnectMinimumMs;
 let serverInstanceId = null;
 let snapshotInProgress = null;
+let haBackpressure = false;
 
 function log(event, details = {}) {
   console.log(JSON.stringify({ occurred_at: new Date().toISOString(), event, home_id: config.homeId, agent_id: config.agentId, ...details }));
@@ -45,14 +50,32 @@ async function enqueueStateSnapshot(client, reason) {
   return snapshotInProgress;
 }
 
+async function waitForHomeAssistantBufferCapacity() {
+  if (!haBackpressure) return;
+  const resumeAt = Math.floor(config.eventQueueLimit * EVENT_BUFFER_RESUME_RATIO);
+  let bufferedEvents = await state.bufferedEvents();
+  log("ha_backpressure_wait", { buffered_events: bufferedEvents, resume_at: resumeAt });
+  while (!stopping && bufferedEvents > resumeAt) {
+    await wait(1_000);
+    bufferedEvents = await state.bufferedEvents();
+  }
+  if (!stopping) log("ha_backpressure_released", { buffered_events: bufferedEvents, resume_at: resumeAt });
+  haBackpressure = false;
+}
+
 async function connectHomeAssistant() {
   while (!stopping) {
     let candidate = null;
     try {
+      await waitForHomeAssistantBufferCapacity();
+      if (stopping) break;
       candidate = new HomeAssistantWebSocketClient({ url: config.haWebSocketUrl, token: config.haToken });
       candidate.onError = (error) => {
         log("ha_subscription_error", { code: error.code || "unknown" });
-        if (error.code === "event_buffer_full") candidate.close();
+        if (error.code === "event_buffer_full") {
+          haBackpressure = true;
+          candidate.close();
+        }
       };
       await candidate.connect();
       candidate.onClose = () => {
@@ -71,6 +94,7 @@ async function connectHomeAssistant() {
       while (!stopping && ha === candidate && candidate.connected) await wait(500);
     } catch (error) {
       if (ha === candidate) ha = null;
+      if (error.code === "event_buffer_full") haBackpressure = true;
       candidate?.close();
       log("ha_connect_failed", { code: error.code || "unknown", retry_ms: reconnectMs });
     }
@@ -83,16 +107,29 @@ async function connectHomeAssistant() {
 
 async function flushEvents() {
   while (!stopping) {
-    const event = await state.firstEvent();
-    if (!event) {
+    const events = await state.firstEvents(EVENT_FLUSH_BATCH_SIZE);
+    if (events.length === 0) {
       await wait(100);
       continue;
     }
+    const deliveredEventIds = [];
+    let deliveryError = null;
+    for (const event of events) {
+      try {
+        await server.sendEvent(event);
+        deliveredEventIds.push(event.event_id);
+      } catch (error) {
+        deliveryError = error;
+        break;
+      }
+    }
     try {
-      await server.sendEvent(event);
-      await state.removeEvent(event.event_id);
+      if (deliveredEventIds.length > 0) await state.removeEvents(deliveredEventIds);
     } catch (error) {
-      log("event_delivery_failed", { code: error.code || "unknown" });
+      deliveryError ||= error;
+    }
+    if (deliveryError) {
+      log("event_delivery_failed", { code: deliveryError.code || "unknown" });
       await wait(1_000);
     }
   }
