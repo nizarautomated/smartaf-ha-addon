@@ -467,6 +467,23 @@ Klanten bevatten uiteindelijk geen leesbare SmartAF automationflows.
 
 ---
 
+## Schaalbaarheids-gate — vóór opschaling van pilot naar 100 klanten
+
+Deze punten zijn harde voorwaarden voordat SmartAF commercieel richting tientallen/honderden woningen gaat:
+
+- [ ] File-based JSON persistence vervangen door PostgreSQL voor config, runtime-state, event/command-status en auditdata.
+- [ ] HA-event filtering invoeren: alleen events naar de VPS sturen die een actieve module/rule nodig heeft.
+- [ ] Centrale state/queues zo opslaan dat meerdere SmartAF-serverinstances veilig tegelijk kunnen draaien; geen correctheid afhankelijk maken van process-local locks.
+- [ ] Klantuitzonderingen uitsluitend als configuratie/module-optie/declaratieve rule modelleren; geen klant-specifieke codebranches in engines.
+- [ ] Fleet management afronden: online/offline, agent/HA-versie, config revision, health/latency, errors en remote diagnostics per woning.
+- [ ] Loadtest uitvoeren met minimaal 100 gelijktijdig verbonden homes, event bursts en command-verkeer.
+- [ ] Failover-test uitvoeren waarbij één SmartAF-serverinstance uitvalt zonder cross-tenant fouten, dubbele commands of verloren state.
+
+### Go/no-go
+Opschalen naar ~100 actieve klanten pas nadat bovenstaande punten zijn afgevinkt. De centrale automationcode blijft één codebase; iedere woning houdt een eigen identity, mapping, configuratie en ruleset.
+
+---
+
 ## Fase 16 — Fleet management voor 100+ klanten
 
 ### Werk
