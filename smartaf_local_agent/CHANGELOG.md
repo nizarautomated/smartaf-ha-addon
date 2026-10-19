@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Allow an optional list of permitted state values for selected telemetry entities. Values outside that list become `unknown`, including buffered events and snapshots; personal zone names are not inferred to mean away.
+- Keep existing policies and saved configurations compatible. No new permissions, automation logic or remote support grants are enabled.
+
 ## 0.1.3
 
 - Forward only typed restoration and last-change metadata, plus next sunrise/sunset timestamps for the sun entity, so the central household observer can distinguish restored sensor values from fresh observations.
