@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5
+
+- Add an optional read-only support consent interface through Home Assistant Ingress. Only explicitly allowed local Home Assistant users can approve an exact pending incident request; grants expire within 30 minutes and can be revoked locally.
+- Add separately scoped support polling, request and report checks, bounded structured diagnostics and session invalidation on disconnect, restart, policy changes or revoked access. Support remains disabled without explicit optional configuration and local policy; no runtime service permissions are added.
+- Keep consent secrets local and in memory. Support reports exclude raw logs, attributes, personal location data, Home Assistant user identities and credentials.
+- Preserve command outcome evidence before acknowledgement retries, so an acknowledgement failure does not execute a successful Home Assistant call again. Optional own-command context evidence remains bounded and does not prove device behavior.
+- Keep existing saved configurations compatible. No new Supervisor permissions, host ports or household automation logic are introduced.
+
 ## 0.1.4
 
 - Allow an optional list of permitted state values for selected telemetry entities. Values outside that list become `unknown`, including buffered events and snapshots; personal zone names are not inferred to mean away.
