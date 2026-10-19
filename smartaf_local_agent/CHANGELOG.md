@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Validate optional server command guards immediately before calling Home Assistant, including the current sensor state and its last change time, so renewed motion and off-on-off cycles reject an obsolete timer command.
+- Reject guarded commands when the required state is missing, unknown or unavailable, when the state read fails or times out, or when the Home Assistant connection changes.
+- Enforce command start times and recheck expiry after the state read; advertise `command_guards_v1` so the server can require compatible clients before delivering guarded commands.
+- Preserve the 0.1.1 batch buffer, reconnect backpressure, existing configuration schema and transport-only responsibility. No new configuration fields or Home Assistant permissions are required.
+
 ## 0.1.1
 
 - Drain durable event backlogs in bounded batches instead of rewriting the full queue after every acknowledgement.
