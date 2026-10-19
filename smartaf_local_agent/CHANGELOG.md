@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+- Forward only typed restoration and last-change metadata, plus next sunrise/sunset timestamps for the sun entity, so the central household observer can distinguish restored sensor values from fresh observations.
+- Add optional local access policy configuration. Explicit policies constrain runtime commands to reviewed direct device platforms, exact entities, services and bounded parameters; a disabled policy stops commands and telemetry. Existing saved configurations without the optional field keep their transport behavior.
+- Recheck policy, actual entity registry, connection and expiry before execution; re-filter buffered events against the current local policy before transmission.
+- Add locally authorized, time-bounded read-only incident primitives with separate operator/home scopes, revocation and redaction. These primitives do not enable remote support automatically; an incident consent/transport interface is still required.
+- Preserve batch buffering, reconnect backpressure and the transport-only role. No additional Home Assistant or Supervisor permissions are requested.
+
 ## 0.1.2
 
 - Validate optional server command guards immediately before calling Home Assistant, including the current sensor state and its last change time, so renewed motion and off-on-off cycles reject an obsolete timer command.
