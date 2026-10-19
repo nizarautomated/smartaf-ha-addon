@@ -124,8 +124,8 @@ test('scope is a strict subset; no body-supplied signature, key, actor, arbitrar
   assert.equal(Date.parse(draft.expires_at) - epoch, 30 * 60_000);
 });
 
-test('disconnect, backlog and restart revoke grants and stale browser sessions fail closed', () => {
-  for (const change of [{ haConnected: false, serverConnected: true, bufferedEvents: 0 }, { haConnected: true, serverConnected: false, bufferedEvents: 0 }, { haConnected: true, serverConnected: true, bufferedEvents: 1 }]) {
+test('disconnect and restart revoke grants and stale browser sessions fail closed', () => {
+  for (const change of [{ haConnected: false, serverConnected: true, bufferedEvents: 1 }, { haConnected: true, serverConnected: false, bufferedEvents: 1 }]) {
     const f = fixture(), session = f.page(), grant = f.approve(session);
     f.controller.setTransportState(change);
     assert.throws(() => f.diagnose(grant), { code: 'support_offline' });

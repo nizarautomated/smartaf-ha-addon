@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { validSolarHistoryPolicy, selectedSolarSnapshot } from './solar-transport.mjs';
 
 const HOME = /^home_[a-z0-9][a-z0-9_]{2,47}$/;
 const OPERATOR = /^operator_[a-z0-9][a-z0-9_]{2,63}$/;
@@ -102,7 +103,8 @@ export function compileAccessPolicy(input, { homeId } = {}) {
       }
     }
   }
-  keys(input.telemetry, ["entities", "state_values"]);
+  keys(input.telemetry, ["entities", "state_values", "solar_history"]);
+  if (input.telemetry.solar_history !== undefined && !validSolarHistoryPolicy(input.telemetry.solar_history)) deny('invalid_solar_history_policy');
   entities(input.telemetry.entities);
   if (input.telemetry.state_values !== undefined) {
     if (!plain(input.telemetry.state_values) || Object.keys(input.telemetry.state_values).length > 512) deny("invalid_access_policy");
@@ -161,6 +163,11 @@ function safeMetadata(metadata, entityId) {
   }
   return Object.keys(result).length ? { metadata: result } : {};
 }
+export function solarHistoryConfiguration(policy, homeId) {
+  if (policy === null || policy === undefined) return null;
+  if (!compiledPolicies.has(policy) || policy.home_id !== homeId) deny('invalid_access_policy');
+  return policy.enabled ? policy.telemetry.solar_history || null : null;
+}
 export function selectTelemetry(event, { policy, homeId } = {}) {
   if (!HOME.test(homeId || "") || event?.home_id !== homeId) deny("wrong_home");
   if (policy === null || policy === undefined) return event;
@@ -184,7 +191,9 @@ export function selectTelemetry(event, { policy, homeId } = {}) {
       return { entity_id: item.entity_id, state: stateValue(item.entity_id,item.state), ...safeMetadata(item.metadata, item.entity_id) };
     });
     if (new Set(states.map((item) => item.entity_id)).size !== states.length) deny("invalid_telemetry");
-    return { ...envelope, payload: { states } };
+    return { ...envelope, payload: { states, ...selectedSolarSnapshot(event.payload, {
+      configuration: policy.telemetry.solar_history, homeId, occurredAt: event.occurred_at
+    }) } };
   }
   if (event.type === "event" && event.event_type === "call_service") {
     if (!STRICT_RUNTIME_SERVICES.includes(event.payload?.service) || !Array.isArray(event.payload?.entity_ids)) return null;

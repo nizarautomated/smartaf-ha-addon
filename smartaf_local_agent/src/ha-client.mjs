@@ -1,3 +1,4 @@
+import { createSolarHistoryRequest } from './solar-history.mjs';
 export class HomeAssistantWebSocketClient {
   constructor({ url, token, WebSocketImpl = globalThis.WebSocket } = {}) {
     if (!WebSocketImpl) throw new Error("WebSocket-ondersteuning ontbreekt");
@@ -47,9 +48,11 @@ export class HomeAssistantWebSocketClient {
           return;
         }
         if (input.type === "result" && this.pending.has(input.id)) {
-          const { resolve: resolvePending, reject: rejectPending } = this.pending.get(input.id);
+          const { resolve: resolvePending, reject: rejectPending, timer, maxBytes } = this.pending.get(input.id);
           this.pending.delete(input.id);
-          if (input.success) resolvePending(input.result);
+          clearTimeout(timer);
+          if (maxBytes && Buffer.byteLength(String(message.data)) > maxBytes) rejectPending(Object.assign(new Error('HA response too large'), { code: 'ha_response_too_large' }));
+          else if (input.success) resolvePending(input.result);
           else rejectPending(Object.assign(new Error(input.error?.message || "Home Assistant-opdracht mislukt"), { code: input.error?.code || "ha_call_failed" }));
           return;
         }
@@ -62,7 +65,7 @@ export class HomeAssistantWebSocketClient {
         this.connected = false;
         this.socket = null;
         const error = Object.assign(new Error("Home Assistant-verbinding gesloten"), { code: "ha_disconnected" });
-        for (const pending of this.pending.values()) pending.reject(error);
+        for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
         this.pending.clear();
         this.subscriptions.clear();
         fail(error);
@@ -71,12 +74,16 @@ export class HomeAssistantWebSocketClient {
     });
   }
 
-  #request(payload) {
+  #request(payload, { timeoutMs, maxBytes } = {}) {
     if (!this.connected || !this.socket) return Promise.reject(Object.assign(new Error("Home Assistant is niet verbonden"), { code: "ha_disconnected" }));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, ...payload }));
+      const timer = timeoutMs ? setTimeout(() => {
+        if (this.pending.delete(id)) reject(Object.assign(new Error('HA request timed out'), { code: 'ha_request_timeout' }));
+      }, timeoutMs) : undefined;
+      this.pending.set(id, { resolve, reject, timer, maxBytes });
+      try { this.socket.send(JSON.stringify({ id, ...payload })); }
+      catch (error) { this.pending.delete(id); clearTimeout(timer); reject(error); }
     });
   }
 
@@ -99,6 +106,14 @@ export class HomeAssistantWebSocketClient {
 
   getStates() {
     return this.#request({ type: "get_states" });
+  }
+
+  async getSolarHistory(configuration) {
+    if (this.solarHistoryPending) throw Object.assign(new Error('Solar request pending'), { code: 'ha_solar_history_pending' });
+    const { query } = createSolarHistoryRequest(configuration);
+    this.solarHistoryPending = true;
+    try { return await this.#request(query, { timeoutMs: 5000, maxBytes: 65536 }); }
+    finally { this.solarHistoryPending = false; }
   }
 
   getEntityRegistry() {

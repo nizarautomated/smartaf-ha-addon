@@ -1,3 +1,4 @@
+import { supportReasonCode } from './support-status.mjs';
 const plain = value => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
 const exact = (value, keys) => plain(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const list = (value, maximum) => Array.isArray(value) && value.length <= maximum;
@@ -14,9 +15,10 @@ export class SupportAgentTransport {
     this.#generation++; this.#pending.clear(); this.#seen.clear();
     try { this.#controller.resetTransportSession(); } catch { /* Untrusted controller clock already closes its access. */ }
   }
-  async #healthy() {
+  async #connectionState() {
     const state = await this.#connection();
-    return state?.haConnected === true && state.bufferedEvents === 0;
+    if (typeof state?.haConnected !== 'boolean' || !Number.isSafeInteger(state.bufferedEvents) || state.bufferedEvents < 0) fail('invalid_support_connection');
+    return state;
   }
   step() {
     if (!this.#running) this.#running = this.#step().finally(() => { this.#running = null; });
@@ -24,7 +26,7 @@ export class SupportAgentTransport {
   }
   async #step() {
     try {
-      const healthy = await this.#healthy();
+      const healthy = (await this.#connectionState()).haConnected;
       const previousSnapshot = this.#controller.transportSnapshot();
       if (!healthy) this.close();
       const generation = this.#generation, snapshot = healthy ? this.#controller.transportSnapshot() : previousSnapshot;
@@ -44,8 +46,12 @@ export class SupportAgentTransport {
       if (!exact(response, ['protocol_version', 'home_id', 'local_session_id', 'server_instance_id', 'session_revoked', 'proposals', 'revoked_grant_ids', 'requests', 'accepted_reports']) || response.protocol_version !== 1 || response.home_id !== this.#homeId || response.local_session_id !== snapshot.local_session_id || typeof response.server_instance_id !== 'string' || !/^support_[a-f0-9-]{36}$/.test(response.server_instance_id) || typeof response.session_revoked !== 'boolean' || !list(response.proposals, 10) || !list(response.revoked_grant_ids, 100) || !list(response.requests, 1) || !list(response.accepted_reports, 1)) fail('invalid_support_response');
       const changedServer = this.#instance !== null && this.#instance !== response.server_instance_id;
       this.#instance = response.server_instance_id;
-      if (!healthy || response.session_revoked || changedServer || !(await this.#healthy())) { this.close(); return { online: false, reason_code: 'support_session_closed' }; }
-      this.#controller.setTransportState({ haConnected: true, serverConnected: true, bufferedEvents: 0 });
+      const currentConnection = await this.#connectionState();
+      if (generation !== this.#generation) return { online:false, reason_code:'support_generation_changed' };
+      if (!healthy || response.session_revoked || changedServer || !currentConnection.haConnected) {
+        this.close(); return { online:false, reason_code: !healthy || !currentConnection.haConnected ? 'ha_disconnected' : changedServer ? 'support_server_changed' : 'support_session_revoked' };
+      }
+      this.#controller.setTransportState({ ...currentConnection, serverConnected: true });
       const transport = { homeId: this.#homeId, localSessionId: snapshot.local_session_id };
       for (const id of response.accepted_reports) this.#pending.delete(id);
       for (const grant of response.proposals) this.#controller.receiveProposal(grant, transport);
@@ -67,11 +73,12 @@ export class SupportAgentTransport {
           this.#controller.assertReadAuthorized(task.request, { operatorId: task.operator_id });
           let timer;
           const supplied = await Promise.race([this.#collect(task.request), new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('Support source timeout'), {code:'support_source_timeout'})), 5_000); })]).finally(() => clearTimeout(timer));
-          if (generation !== this.#generation || !(await this.#healthy()) || this.#clock() >= expires) fail('support_read_cancelled');
+          const sourceConnection = await this.#connectionState();
+          if (generation !== this.#generation || !sourceConnection.haConnected || this.#clock() >= expires) fail('support_read_cancelled');
           const report = this.#controller.readDiagnosis(task.request, supplied, { operatorId: task.operator_id });
           update = { request_id: task.request_id, status: 'ok', report };
         } catch (error) {
-          if (['support_source_timeout', 'support_read_cancelled'].includes(error?.code)) this.close();
+          if (['support_source_timeout', 'support_read_cancelled', 'invalid_support_connection', 'ha_disconnected'].includes(error?.code)) this.close();
           update = { request_id: task.request_id, status: 'denied' };
         }
         if (generation !== this.#generation) return { online: false, reason_code: 'support_generation_changed' };
@@ -80,7 +87,7 @@ export class SupportAgentTransport {
       return { online: true };
     } catch (error) {
       this.close();
-      return { online: false, reason_code: /^[a-z_]+$/.test(error?.code ?? '') ? error.code : 'support_transport_failed' };
+      return { online: false, reason_code: supportReasonCode(error?.code) };
     }
   }
 }

@@ -98,7 +98,9 @@ export class SupportConsentController {
     if (typeof haConnected !== 'boolean' || typeof serverConnected !== 'boolean' || !Number.isSafeInteger(bufferedEvents) || bufferedEvents < 0) {
       this.#offline(); throw new TypeError('Invalid local transport state');
     }
-    const online = haConnected && serverConnected && bufferedEvents === 0;
+    // Ordinary automation telemetry may wait briefly while support still has
+    // a fresh, authenticated connection. Its queue count remains diagnostic.
+    const online = haConnected && serverConnected;
     if (!online) { this.#offline(); return; }
     this.#online = true; this.#access.setOnline(true);
   }

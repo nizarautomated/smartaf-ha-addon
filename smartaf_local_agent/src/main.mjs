@@ -1,15 +1,19 @@
 import { loadConfig } from "./config.mjs";
+import { randomUUID } from 'node:crypto';
+import { captureStateSnapshot } from './snapshot-capture.mjs';
 import { selectTelemetry } from './access-policy.mjs';
 import { enforceLocalPolicy } from './policy-runtime.mjs';
 import { assertCommandReady } from "./command-guard.mjs";
 import { DurableAgentState } from "./durable-state.mjs";
 import { HomeAssistantWebSocketClient, subscribeHomeAssistantObservations } from "./ha-client.mjs";
 import { acknowledgeCommandResult, executeCommandAttempt } from './command-execution.mjs';
-import { acknowledgement, eventFromHomeAssistant, serviceCallFromCommand, stateSnapshotFromHomeAssistant, validateServerCommand } from "./protocol.mjs";
+import { acknowledgement, eventFromHomeAssistant, serviceCallFromCommand, validateServerCommand } from "./protocol.mjs";
 import { SmartAFServerClient } from "./server-client.mjs";
 import { SupportConsentController } from './support-consent.mjs';
 import { createSupportConsentServer } from './support-consent-server.mjs';
 import { SupportAgentTransport, SupportDiagnosticJournal } from './support-agent-transport.mjs';
+import { ServerContinuity } from './server-continuity.mjs';
+import { SupportStatusReporter } from './support-status.mjs';
 
 const config = loadConfig();
 const state = await new DurableAgentState({ dataDir: config.dataDir, eventQueueLimit: config.eventQueueLimit }).init();
@@ -23,10 +27,11 @@ const server = new SmartAFServerClient({
 let stopping = false;
 let ha = null;
 let reconnectMs = config.reconnectMinimumMs;
-let serverInstanceId = null;
-let snapshotInProgress = null;
+const serverContinuity = new ServerContinuity();
+const snapshotsInProgress = new WeakMap(), connectionEpochs = new WeakMap();
 let supportController = null, supportTransport = null, supportUiServer = null;
 const supportJournal = config.supportConsent.enabled ? new SupportDiagnosticJournal() : null;
+const supportStatus = new SupportStatusReporter({ emit: log });
 
 function log(event, details = {}) {
   console.log(JSON.stringify({ occurred_at: new Date().toISOString(), event, home_id: config.homeId, agent_id: config.agentId, ...details }));
@@ -36,8 +41,9 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function closeSupport() {
+function closeSupport(reasonCode = 'support_transport_closed') {
   try { supportTransport?.close(); } catch { /* A clock failure already closes local support. */ }
+  if (supportTransport) supportStatus.record({ online:false, reason_code:reasonCode });
 }
 
 async function startSupport() {
@@ -47,7 +53,7 @@ async function startSupport() {
     supportController = new SupportConsentController({ homeId: config.homeId, policy: config.accessPolicy, allowedOrigins: config.supportConsent.allowedOrigins, allowedConsentUsers: config.supportConsent.allowedConsentUsers });
     supportUiServer = createSupportConsentServer({ controller: supportController });
     await new Promise((resolve, reject) => { supportUiServer.once('error', reject); supportUiServer.listen(config.supportConsent.port, '0.0.0.0', resolve); });
-    supportUiServer.on('error', () => { closeSupport(); supportUiServer.close(); supportTransport = null; log('support_disabled', { code: 'support_listener_failed' }); });
+    supportUiServer.on('error', () => { closeSupport('support_listener_failed'); supportUiServer.close(); supportTransport = null; log('support_disabled', { code: 'support_listener_failed' }); });
     if (config.accessPolicy?.enabled && config.accessPolicy.support.enabled) {
       supportTransport = new SupportAgentTransport({ homeId: config.homeId, policyRevision: config.accessPolicy.revision, controller: supportController, client: server,
         connectionState: async () => ({ haConnected: ha?.connected === true, bufferedEvents: await state.bufferedEvents() }),
@@ -65,7 +71,7 @@ async function startSupport() {
       });
     }
   } catch {
-    closeSupport(); supportTransport = null; supportUiServer?.close(); supportUiServer = null;
+    closeSupport('support_start_failed'); supportTransport = null; supportUiServer?.close(); supportUiServer = null;
     log('support_disabled', { code: 'support_start_failed' });
   }
 }
@@ -73,28 +79,25 @@ async function startSupport() {
 async function pollSupport() {
   if (!supportTransport) return;
   while (!stopping && supportTransport) {
-    await supportTransport.step();
+    supportStatus.record(await supportTransport.step());
     await wait(2_000);
   }
 }
 
 async function enqueueStateSnapshot(client, reason) {
-  if (snapshotInProgress) return snapshotInProgress;
-  snapshotInProgress = (async () => {
-    const states = await client.getStates();
-    if (!Array.isArray(states)) throw Object.assign(new Error("Home Assistant gaf geen statelijst"), { code: "ha_invalid_states" });
-    const snapshot = selectTelemetry(stateSnapshotFromHomeAssistant({
-      homeId: config.homeId,
-      agentId: config.agentId,
-      states
-    }), {policy:config.accessPolicy,homeId:config.homeId});
+  if (snapshotsInProgress.has(client)) return snapshotsInProgress.get(client);
+  if (!connectionEpochs.has(client)) connectionEpochs.set(client, randomUUID());
+  const pending = (async () => {
+    const { snapshot } = await captureStateSnapshot({ client, homeId: config.homeId, agentId: config.agentId,
+      policy: config.accessPolicy, connectionEpoch: connectionEpochs.get(client), isCurrent: () => ha === client });
     if (!snapshot) return;
     await state.enqueueSequencedEvent(snapshot);
     log("ha_state_snapshot_buffered", { reason, state_count: snapshot.payload.states.length });
   })().finally(() => {
-    snapshotInProgress = null;
+    snapshotsInProgress.delete(client);
   });
-  return snapshotInProgress;
+  snapshotsInProgress.set(client, pending);
+  return pending;
 }
 
 async function connectHomeAssistant() {
@@ -108,7 +111,7 @@ async function connectHomeAssistant() {
       };
       await candidate.connect();
       candidate.onClose = () => {
-        if (ha === candidate) { ha = null; closeSupport(); }
+        if (ha === candidate) { ha = null; closeSupport('ha_disconnected'); }
       };
       const enqueueHomeAssistantEvent = async (event) => {
         const rawEnvelope = eventFromHomeAssistant({ homeId: config.homeId, agentId: config.agentId, sequence: 0, event });
@@ -126,7 +129,7 @@ async function connectHomeAssistant() {
       while (!stopping && ha === candidate && candidate.connected) await wait(500);
     } catch (error) {
       if (ha === candidate) ha = null;
-      closeSupport();
+      closeSupport('ha_connect_failed');
       candidate?.close();
       log("ha_connect_failed", { code: error.code || "unknown", retry_ms: reconnectMs });
     }
@@ -149,7 +152,7 @@ async function flushEvents() {
       if (selected) await server.sendEvent(selected);
       await state.removeEvent(event.event_id);
     } catch (error) {
-      closeSupport();
+      closeSupport('event_delivery_failed');
       log("event_delivery_failed", { code: error.code || "unknown" });
       await wait(1_000);
     }
@@ -200,7 +203,7 @@ async function pollCommands() {
         for (const command of commands) await executeCommand(command);
       }
     } catch (error) {
-      closeSupport();
+      closeSupport('command_poll_failed');
       log("command_poll_failed", { code: error.code || "unknown" });
     }
     await wait(config.pollIntervalMs);
@@ -218,15 +221,11 @@ async function heartbeat() {
         buffered_events: await state.bufferedEvents(),
         capabilities: ["state_events", ...(ha?.serviceObservationsAvailable?['service_observations']:[]), "commands", "acknowledgements", "durable_buffer", "no_automation_logic", "command_guards_v1", "state_metadata_v1", "own_command_context_v1", ...(config.accessPolicy ? ['local_access_policy_v1'] : [])]
       });
-      if (typeof response.server_instance_id === "string") {
-        if (serverInstanceId && serverInstanceId !== response.server_instance_id && ha?.connected) {
-          closeSupport();
-          await enqueueStateSnapshot(ha, "control_plane_restart");
-        }
-        serverInstanceId = response.server_instance_id;
-      }
+      const continuity = serverContinuity.observe(response);
+      if (continuity.reset_support) closeSupport(continuity.reason_code);
+      if (continuity.request_snapshot && ha?.connected) await enqueueStateSnapshot(ha, continuity.reason_code);
     } catch (error) {
-      closeSupport();
+      closeSupport('heartbeat_failed');
       log("heartbeat_failed", { code: error.code || "unknown" });
     }
     await wait(config.heartbeatIntervalMs);
@@ -236,7 +235,7 @@ async function heartbeat() {
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     stopping = true;
-    closeSupport(); supportUiServer?.close();
+    closeSupport('agent_stopping'); supportUiServer?.close();
     ha?.close();
   });
 }
