@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { commandContextForAcknowledgement } from './command-provenance.mjs';
 
 const ENTITY_ID_PATTERN = /^[a-z][a-z0-9_]*\.[a-z0-9_]+$/;
 const COMMAND_ID_PATTERN = /^cmd_[a-f0-9-]{36}$/;
@@ -11,6 +12,8 @@ export function stateMetadata(state) {
   const metadata = {};
   const changed = Date.parse(state?.last_changed);
   if (Number.isFinite(changed)) metadata.last_changed = new Date(changed).toISOString();
+  // Presence of the flag is explicit; absence from an older envelope remains
+  // distinguishable from a state actually read from HA with restored=false.
   metadata.restored = state?.attributes?.restored === true;
   if (state?.entity_id === 'sun.sun') {
     const solar = {};
@@ -23,7 +26,7 @@ export function stateMetadata(state) {
   return metadata;
 }
 
-export function eventFromHomeAssistant({ homeId, agentId, event }) {
+export function eventFromHomeAssistant({ homeId, agentId, sequence, event }) {
   if (!isObject(event) || !isObject(event.data)) return null;
   const occurredAt = Date.parse(event.time_fired);
   const envelope = {
@@ -31,7 +34,7 @@ export function eventFromHomeAssistant({ homeId, agentId, event }) {
     home_id: homeId,
     agent_id: agentId,
     event_id: `evt_${randomUUID()}`,
-    sequence: 0,
+    sequence,
     occurred_at: Number.isFinite(occurredAt) ? new Date(occurredAt).toISOString() : new Date().toISOString()
   };
   if (event.event_type === "call_service") {
@@ -42,7 +45,12 @@ export function eventFromHomeAssistant({ homeId, agentId, event }) {
     const entityIds = (Array.isArray(rawTargets) ? rawTargets : [rawTargets])
       .filter((entityId) => typeof entityId === "string" && ENTITY_ID_PATTERN.test(entityId))
       .slice(0, 64);
-    return { ...envelope, type: "event", event_type: "call_service", payload: { service: `${domain}.${service}`, entity_ids: entityIds } };
+    return {
+      ...envelope,
+      type: "event",
+      event_type: "call_service",
+      payload: { service: `${domain}.${service}`, entity_ids: entityIds }
+    };
   }
   if (event.event_type !== "state_changed") return null;
   const entityId = event.data.entity_id;
@@ -108,8 +116,15 @@ export function validateServerCommand(input, { homeId, agentId, allowedServices,
       if (!Number.isFinite(observedAt) || observedAt > notBefore) add("guard.observed_at", "is ongeldig");
     }
   }
-  if (errors.length) throw Object.assign(new Error("Servercommand is geweigerd"), { code: "invalid_command", details: errors });
-  return { ...input, not_before_timestamp: notBefore, expires_at_timestamp: expiresAt };
+  if (errors.length) {
+    const error = Object.assign(new Error("Servercommand is geweigerd"), { code: "invalid_command", details: errors });
+    throw error;
+  }
+  return {
+    ...input,
+    not_before_timestamp: notBefore,
+    expires_at_timestamp: expiresAt
+  };
 }
 
 export function serviceCallFromCommand(command) {
@@ -121,7 +136,8 @@ export function serviceCallFromCommand(command) {
   };
 }
 
-export function acknowledgement(command, agentId, status, { errorCode, latencyMs, now = Date.now() } = {}) {
+export function acknowledgement(command, agentId, status, { errorCode, latencyMs, commandContext, now = Date.now() } = {}) {
+  const context=commandContextForAcknowledgement(command,commandContext,status);
   return {
     protocol_version: 1,
     command_id: command.command_id,
@@ -129,6 +145,7 @@ export function acknowledgement(command, agentId, status, { errorCode, latencyMs
     status,
     occurred_at: new Date(now).toISOString(),
     ...(Number.isFinite(latencyMs) ? { latency_ms: latencyMs } : {}),
+    ...(context ? {command_context:context} : {}),
     ...(errorCode ? { error_code: String(errorCode).slice(0, 96) } : {})
   };
 }

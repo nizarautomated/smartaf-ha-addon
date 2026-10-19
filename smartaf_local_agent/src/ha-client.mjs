@@ -47,10 +47,10 @@ export class HomeAssistantWebSocketClient {
           return;
         }
         if (input.type === "result" && this.pending.has(input.id)) {
-          const pending = this.pending.get(input.id);
+          const { resolve: resolvePending, reject: rejectPending } = this.pending.get(input.id);
           this.pending.delete(input.id);
-          if (input.success) pending.resolve(input.result);
-          else pending.reject(Object.assign(new Error(input.error?.message || "Home Assistant-opdracht mislukt"), { code: input.error?.code || "ha_call_failed" }));
+          if (input.success) resolvePending(input.result);
+          else rejectPending(Object.assign(new Error(input.error?.message || "Home Assistant-opdracht mislukt"), { code: input.error?.code || "ha_call_failed" }));
           return;
         }
         if (input.type === "event" && this.subscriptions.has(input.id)) {
@@ -102,10 +102,23 @@ export class HomeAssistantWebSocketClient {
   }
 
   getEntityRegistry() {
-    return this.#request({ type: 'config/entity_registry/list' });
+    return this.#request({ type: "config/entity_registry/list" });
   }
 
   close() {
     this.socket?.close();
+  }
+}
+
+export async function subscribeHomeAssistantObservations(client,handler) {
+  await client.subscribeStateChanges(handler);
+  try {
+    await client.subscribeEvent('call_service',handler);
+    return {service_observations:true};
+  } catch(error) {
+    // This diagnostic stream is admin-only in HA. A denied optional stream
+    // must not require additional rights or discard allowed state telemetry.
+    if(['unauthorized','not_allowed'].includes(error?.code))return {service_observations:false};
+    throw error;
   }
 }

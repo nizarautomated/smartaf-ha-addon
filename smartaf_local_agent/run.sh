@@ -13,6 +13,10 @@ export SMARTAF_ACCESS_POLICY_JSON=""
 if bashio::config.has_value 'access_policy_json'; then
   export SMARTAF_ACCESS_POLICY_JSON="$(bashio::config 'access_policy_json')"
 fi
+export SMARTAF_SUPPORT_CONSENT_JSON=""
+if bashio::config.has_value 'support_consent_json'; then
+  export SMARTAF_SUPPORT_CONSENT_JSON="$(bashio::config 'support_consent_json')"
+fi
 export SMARTAF_DATA_DIR=/data
 export SMARTAF_AGENT_VERSION="${SMARTAF_AGENT_VERSION:-0.0.0}"
 

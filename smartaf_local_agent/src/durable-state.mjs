@@ -20,7 +20,12 @@ export class DurableAgentState {
     await mkdir(this.dataDir, { recursive: true, mode: 0o700 });
     try {
       const loaded = JSON.parse(await readFile(this.path, "utf8"));
-      if (loaded.schema_version !== 1 || !Array.isArray(loaded.events) || !Array.isArray(loaded.processed_commands)) throw new Error("Ongeldige agent-state");
+      if (loaded.schema_version !== 1 || !Array.isArray(loaded.events)) throw new Error("Ongeldige agent-state");
+      if (!Array.isArray(loaded.processed_commands) && Array.isArray(loaded.processed_command_ids)) {
+        loaded.processed_commands = loaded.processed_command_ids.map((command_id) => ({ command_id, status: "succeeded" }));
+        delete loaded.processed_command_ids;
+      }
+      if (!Array.isArray(loaded.processed_commands)) throw new Error("Ongeldige agent-state");
       this.state = loaded;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
@@ -45,10 +50,27 @@ export class DurableAgentState {
     return run;
   }
 
+  nextSequence() {
+    return this.#mutate((state) => {
+      state.sequence += 1;
+      return state.sequence;
+    });
+  }
+
+  enqueueEvent(event) {
+    return this.#mutate((state) => {
+      if (state.events.length >= this.eventQueueLimit) throw Object.assign(new Error("Eventbuffer is vol"), { code: "event_buffer_full" });
+      state.events.push(event);
+      return state.events.length;
+    });
+  }
+
   enqueueSequencedEvents(events) {
     if (!Array.isArray(events)) throw new Error("Events moeten een lijst zijn");
     return this.#mutate((state) => {
-      if (state.events.length + events.length > this.eventQueueLimit) throw Object.assign(new Error("Eventbuffer is vol"), { code: "event_buffer_full" });
+      if (state.events.length + events.length > this.eventQueueLimit) {
+        throw Object.assign(new Error("Eventbuffer is vol"), { code: "event_buffer_full" });
+      }
       const sequenced = events.map((event) => ({ ...event, sequence: ++state.sequence }));
       state.events.push(...sequenced);
       return structuredClone(sequenced);
@@ -60,24 +82,14 @@ export class DurableAgentState {
   }
 
   async firstEvent() {
-    return (await this.firstEvents(1))[0] || null;
-  }
-
-  async firstEvents(limit = 1) {
-    if (!Number.isInteger(limit) || limit < 1) throw new Error("Eventlimiet moet een positief geheel getal zijn");
     await this.lock.catch(() => {});
-    return structuredClone(this.state.events.slice(0, limit));
+    return this.state.events[0] ? structuredClone(this.state.events[0]) : null;
   }
 
   removeEvent(eventId) {
-    return this.removeEvents([eventId]);
-  }
-
-  removeEvents(eventIds) {
-    if (!Array.isArray(eventIds)) throw new Error("Event-ID's moeten een lijst zijn");
-    const ids = new Set(eventIds);
     return this.#mutate((state) => {
-      state.events = state.events.filter((event) => !ids.has(event.event_id));
+      if (state.events[0]?.event_id === eventId) state.events.shift();
+      else state.events = state.events.filter((event) => event.event_id !== eventId);
       return state.events.length;
     });
   }
@@ -98,7 +110,9 @@ export class DurableAgentState {
       const existing = state.processed_commands.findIndex((candidate) => candidate.command_id === result.command_id);
       if (existing >= 0) state.processed_commands[existing] = result;
       else state.processed_commands.push(result);
-      if (state.processed_commands.length > this.processedCommandLimit) state.processed_commands.splice(0, state.processed_commands.length - this.processedCommandLimit);
+      if (state.processed_commands.length > this.processedCommandLimit) {
+        state.processed_commands.splice(0, state.processed_commands.length - this.processedCommandLimit);
+      }
     });
   }
 }
