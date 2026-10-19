@@ -102,8 +102,16 @@ export function compileAccessPolicy(input, { homeId } = {}) {
       }
     }
   }
-  keys(input.telemetry, ["entities"]);
+  keys(input.telemetry, ["entities", "state_values"]);
   entities(input.telemetry.entities);
+  if (input.telemetry.state_values !== undefined) {
+    if (!plain(input.telemetry.state_values) || Object.keys(input.telemetry.state_values).length > 512) deny("invalid_access_policy");
+    for (const [entityId, allowed] of Object.entries(input.telemetry.state_values)) {
+      if (!input.telemetry.entities.includes(entityId)) deny("invalid_access_policy");
+      strings(allowed, /^[a-zA-Z0-9 _.-]{1,128}$/, 32, "invalid_access_policy");
+      if (!allowed.length) deny("invalid_access_policy");
+    }
+  }
   const support = input.support ?? { enabled: false, operators: [], entities: [], actions: [] };
   keys(support, ["enabled", "operators", "entities", "actions"]);
   if (typeof support.enabled !== "boolean") deny("invalid_access_policy");
@@ -159,18 +167,21 @@ export function selectTelemetry(event, { policy, homeId } = {}) {
   if (!compiledPolicies.has(policy) || policy.home_id !== homeId) deny("invalid_access_policy");
   if (policy.enabled !== true) return null;
   const selected = new Set(policy.telemetry.entities);
+  // A privacy filter, never an inference: an unlisted zone is unknown, not away.
+  const stateValue = (entityId, value) => value === null || !policy.telemetry.state_values?.[entityId]
+    ? value : policy.telemetry.state_values[entityId].includes(value) ? value : 'unknown';
   const envelope = Object.fromEntries(["protocol_version", "home_id", "agent_id", "event_id", "sequence", "occurred_at", "type"].map((key) => [key, event[key]]));
   const origin = ["manual", "automation", "unknown"].includes(event.origin) ? event.origin : "unknown";
   if (event.type === "state_changed") {
     if (!selected.has(event.entity_id)) return null;
     if (typeof event.new_state !== "string" || event.new_state.length > 128 || !(event.old_state === null || (typeof event.old_state === "string" && event.old_state.length <= 128))) deny("invalid_telemetry");
-    return { ...envelope, entity_id: event.entity_id, old_state: event.old_state, new_state: event.new_state, origin, ...safeMetadata(event.metadata, event.entity_id) };
+    return { ...envelope, entity_id: event.entity_id, old_state: stateValue(event.entity_id,event.old_state), new_state: stateValue(event.entity_id,event.new_state), origin, ...safeMetadata(event.metadata, event.entity_id) };
   }
   if (event.type === "state_snapshot") {
     if (!Array.isArray(event.payload?.states) || event.payload.states.length > 5_000) deny("invalid_telemetry");
     const states = event.payload.states.filter((item) => selected.has(item?.entity_id)).map((item) => {
       if (typeof item.state !== "string" || item.state.length > 128) deny("invalid_telemetry");
-      return { entity_id: item.entity_id, state: item.state, ...safeMetadata(item.metadata, item.entity_id) };
+      return { entity_id: item.entity_id, state: stateValue(item.entity_id,item.state), ...safeMetadata(item.metadata, item.entity_id) };
     });
     if (new Set(states.map((item) => item.entity_id)).size !== states.length) deny("invalid_telemetry");
     return { ...envelope, payload: { states } };

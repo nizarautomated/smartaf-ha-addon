@@ -39,6 +39,20 @@ function command(change = {}) { return { home_id: homeId, policy_revision: 3, en
 function event(change = {}) { return { protocol_version: 1, home_id: homeId, agent_id: 'agent_alpha', event_id: 'evt_1234567', sequence: 1, occurred_at: iso(epoch), type: 'state_changed', entity_id: 'light.kitchen', old_state: 'off', new_state: 'on', ...change }; }
 const rejects = (fn, code) => assert.throws(fn, code ? { code } : undefined);
 
+test('optional state-value privacy filter applies to events and replayed snapshots without inferring away', () => {
+  const input=configuration(); input.telemetry.entities.push('person.resident');
+  input.telemetry.state_values={'person.resident':['home','not_home','unknown','unavailable']};
+  const policy=compileAccessPolicy(input,{homeId});
+  const selected=selectTelemetry(event({entity_id:'person.resident',old_state:'Private workplace',new_state:'Secret zone'}),{policy,homeId});
+  assert.equal(selected.old_state,'unknown');assert.equal(selected.new_state,'unknown');
+  assert.equal(selectTelemetry(event({entity_id:'person.resident',old_state:null,new_state:'home'}),{policy,homeId}).new_state,'home');
+  const snapshot=selectTelemetry(event({type:'state_snapshot',payload:{states:[{entity_id:'person.resident',state:'Secret zone'},{entity_id:'light.kitchen',state:'on'}]}}),{policy,homeId});
+  assert.deepEqual(snapshot.payload.states,[{entity_id:'person.resident',state:'unknown'},{entity_id:'light.kitchen',state:'on'}]);
+  assert.equal(JSON.stringify({selected,snapshot}).includes('Secret'),false);
+  input.telemetry.state_values['person.unselected']=['home'];
+  rejects(()=>compileAccessPolicy(input,{homeId}),'invalid_access_policy');
+});
+
 test('optional policy preserves runtime compatibility but support remains denied', () => {
   assert.equal(compileAccessPolicy(undefined, { homeId }), null);
   assert.equal(authorizeRuntimeCommand(command(), runtimeOptions(null)).mode, 'legacy');
