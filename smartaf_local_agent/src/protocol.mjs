@@ -7,6 +7,22 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+export function stateMetadata(state) {
+  const metadata = {};
+  const changed = Date.parse(state?.last_changed);
+  if (Number.isFinite(changed)) metadata.last_changed = new Date(changed).toISOString();
+  metadata.restored = state?.attributes?.restored === true;
+  if (state?.entity_id === 'sun.sun') {
+    const solar = {};
+    for (const key of ['next_rising', 'next_setting']) {
+      const at = Date.parse(state.attributes?.[key]);
+      if (Number.isFinite(at)) solar[key] = new Date(at).toISOString();
+    }
+    if (Object.keys(solar).length) metadata.solar = solar;
+  }
+  return metadata;
+}
+
 export function eventFromHomeAssistant({ homeId, agentId, event }) {
   if (!isObject(event) || !isObject(event.data)) return null;
   const occurredAt = Date.parse(event.time_fired);
@@ -38,7 +54,8 @@ export function eventFromHomeAssistant({ homeId, agentId, event }) {
     type: "state_changed",
     entity_id: entityId,
     old_state: oldState === null ? null : String(oldState).slice(0, 128),
-    new_state: String(newState).slice(0, 128)
+    new_state: String(newState).slice(0, 128),
+    metadata: stateMetadata({...event.data.new_state, entity_id: entityId})
   };
 }
 
@@ -47,7 +64,7 @@ export function stateSnapshotFromHomeAssistant({ homeId, agentId, states, captur
   const sanitized = states
     .filter((item) => isObject(item) && typeof item.entity_id === "string" && ENTITY_ID_PATTERN.test(item.entity_id) && typeof item.state === "string")
     .slice(0, 5_000)
-    .map((item) => ({ entity_id: item.entity_id, state: item.state.slice(0, 128) }));
+    .map((item) => ({ entity_id: item.entity_id, state: item.state.slice(0, 128), metadata: stateMetadata(item) }));
   return {
     protocol_version: 1,
     home_id: homeId,

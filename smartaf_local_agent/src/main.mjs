@@ -1,4 +1,6 @@
 import { loadConfig } from "./config.mjs";
+import { selectTelemetry } from './access-policy.mjs';
+import { enforceLocalPolicy } from './policy-runtime.mjs';
 import { assertCommandReady } from "./command-guard.mjs";
 import { DurableAgentState } from "./durable-state.mjs";
 import { HomeAssistantWebSocketClient } from "./ha-client.mjs";
@@ -38,11 +40,12 @@ async function enqueueStateSnapshot(client, reason) {
   snapshotInProgress = (async () => {
     const states = await client.getStates();
     if (!Array.isArray(states)) throw Object.assign(new Error("Home Assistant gaf geen statelijst"), { code: "ha_invalid_states" });
-    const snapshot = stateSnapshotFromHomeAssistant({
+    const snapshot = selectTelemetry(stateSnapshotFromHomeAssistant({
       homeId: config.homeId,
       agentId: config.agentId,
       states
-    });
+    }), {policy:config.accessPolicy,homeId:config.homeId});
+    if (!snapshot) return;
     await state.enqueueSequencedEvent(snapshot);
     log("ha_state_snapshot_buffered", { reason, state_count: snapshot.payload.states.length });
   })().finally(() => {
@@ -83,7 +86,8 @@ async function connectHomeAssistant() {
         if (ha === candidate) ha = null;
       };
       const enqueueHomeAssistantEvent = async (event) => {
-        const envelope = eventFromHomeAssistant({ homeId: config.homeId, agentId: config.agentId, event });
+        const rawEnvelope = eventFromHomeAssistant({ homeId: config.homeId, agentId: config.agentId, event });
+        const envelope = rawEnvelope && selectTelemetry(rawEnvelope,{policy:config.accessPolicy,homeId:config.homeId});
         if (envelope) await state.enqueueSequencedEvent(envelope);
       };
       await candidate.subscribeStateChanges(enqueueHomeAssistantEvent);
@@ -117,7 +121,8 @@ async function flushEvents() {
     let deliveryError = null;
     for (const event of events) {
       try {
-        await server.sendEvent(event);
+        const selected=selectTelemetry(event,{policy:config.accessPolicy,homeId:config.homeId});
+        if (selected) await server.sendEvent(selected);
         deliveredEventIds.push(event.event_id);
       } catch (error) {
         deliveryError = error;
@@ -162,6 +167,7 @@ async function executeCommand(rawCommand) {
   const started = performance.now();
   await state.recordCommandResult({ command_id: command.command_id, status: "executing", occurred_at: new Date().toISOString() });
   try {
+    await enforceLocalPolicy(command,{policy:config.accessPolicy,homeId:config.homeId,client,isCurrentClient:candidate=>ha===candidate});
     await assertCommandReady(command, { client, isCurrentClient: (candidate) => ha === candidate });
     await client.callService(serviceCallFromCommand(command));
     const result = { command_id: command.command_id, status: "succeeded", occurred_at: new Date().toISOString(), latency_ms: Number((performance.now() - started).toFixed(3)) };
@@ -197,7 +203,7 @@ async function heartbeat() {
         agent_version: config.agentVersion,
         connection_state: ha?.connected ? "online" : "ha_disconnected",
         buffered_events: await state.bufferedEvents(),
-        capabilities: ["state_events", "state_snapshots", "service_observations", "commands", "acknowledgements", "durable_buffer", "no_automation_logic", "command_guards_v1"]
+        capabilities: ["state_events", "state_snapshots", "service_observations", "commands", "acknowledgements", "durable_buffer", "no_automation_logic", "command_guards_v1", "state_metadata_v1", ...(config.accessPolicy ? ['local_access_policy_v1'] : [])]
       });
       if (typeof response.server_instance_id === "string") {
         if (serverInstanceId && serverInstanceId !== response.server_instance_id && ha?.connected) await enqueueStateSnapshot(ha, "control_plane_restart");

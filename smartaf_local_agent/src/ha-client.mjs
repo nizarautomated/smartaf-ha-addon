@@ -101,6 +101,10 @@ export class HomeAssistantWebSocketClient {
     return this.#request({ type: "get_states" });
   }
 
+  getEntityRegistry() {
+    return this.#request({ type: 'config/entity_registry/list' });
+  }
+
   close() {
     this.socket?.close();
   }

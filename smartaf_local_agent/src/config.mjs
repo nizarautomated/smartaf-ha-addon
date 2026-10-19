@@ -1,3 +1,4 @@
+import { compileAccessPolicy } from './access-policy.mjs';
 const HOME_ID_PATTERN = /^home_[a-z0-9_]{3,48}$/;
 const AGENT_ID_PATTERN = /^agent_[a-z0-9_]{3,64}$/;
 
@@ -37,6 +38,7 @@ export function loadConfig(env = process.env) {
     dataDir: env.SMARTAF_DATA_DIR || "/data",
     agentVersion: env.SMARTAF_AGENT_VERSION || "0.0.0",
     allowedServices,
+    accessPolicy: compileAccessPolicy(env.SMARTAF_ACCESS_POLICY_JSON?.trim() ? JSON.parse(env.SMARTAF_ACCESS_POLICY_JSON) : null, {homeId}),
     pollIntervalMs: integer(env, "SMARTAF_POLL_INTERVAL_MS", 500, 100, 60_000),
     heartbeatIntervalMs: integer(env, "SMARTAF_HEARTBEAT_INTERVAL_MS", 30_000, 5_000, 300_000),
     eventQueueLimit: integer(env, "SMARTAF_EVENT_QUEUE_LIMIT", 5_000, 100, 100_000),

@@ -1,5 +1,5 @@
 name: SmartAF Local Agent
-version: "0.1.2"
+version: "0.1.3"
 slug: smartaf_local_agent
 description: Verbindt Home Assistant veilig met de centrale SmartAF-automationserver zonder lokale beslislogica.
 url: https://github.com/nizarautomated/smartaf-ha-addon
@@ -21,6 +21,7 @@ options:
   poll_interval_ms: 500
   heartbeat_interval_ms: 30000
   event_queue_limit: 5000
+  access_policy_json: ""
 schema:
   home_id: "match(^home_[a-z0-9][a-z0-9_]{2,47}$)"
   agent_id: "match(^agent_[a-z0-9_]{3,64}$)"
@@ -30,3 +31,4 @@ schema:
   poll_interval_ms: int(100,60000)
   heartbeat_interval_ms: int(5000,300000)
   event_queue_limit: int(100,100000)
+  access_policy_json: "str?"

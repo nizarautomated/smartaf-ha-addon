@@ -41,6 +41,6 @@ test("snapshot is één begrensd event zonder attributen", () => {
     states: [{ entity_id: "light.keuken", state: "on", attributes: { secret: "ignored" } }],
     capturedAt: "2026-08-16T10:00:00.000Z"
   });
-  assert.deepEqual(event.payload.states, [{ entity_id: "light.keuken", state: "on" }]);
+  assert.deepEqual(event.payload.states, [{ entity_id: "light.keuken", state: "on", metadata: { restored: false } }]);
   assert.equal(JSON.stringify(event).includes("secret"), false);
 });

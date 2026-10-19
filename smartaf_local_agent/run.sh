@@ -9,6 +9,10 @@ export SMARTAF_ALLOWED_SERVICES="$(bashio::config 'allowed_services')"
 export SMARTAF_POLL_INTERVAL_MS="$(bashio::config 'poll_interval_ms')"
 export SMARTAF_HEARTBEAT_INTERVAL_MS="$(bashio::config 'heartbeat_interval_ms')"
 export SMARTAF_EVENT_QUEUE_LIMIT="$(bashio::config 'event_queue_limit')"
+export SMARTAF_ACCESS_POLICY_JSON=""
+if bashio::config.has_value 'access_policy_json'; then
+  export SMARTAF_ACCESS_POLICY_JSON="$(bashio::config 'access_policy_json')"
+fi
 export SMARTAF_DATA_DIR=/data
 export SMARTAF_AGENT_VERSION="${SMARTAF_AGENT_VERSION:-0.0.0}"
 
