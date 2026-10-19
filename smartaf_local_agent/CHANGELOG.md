@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6
+
+- Keep read-only support sessions open during ordinary automation telemetry backlogs and observer snapshot refreshes. Distinguish the server process from its observer resynchronization token; real connection loss, process replacement, expiry and local revocation still invalidate support.
+- Add bounded support transition reason codes for troubleshooting without logging grant contents, Home Assistant users, credentials or household values.
+- Add optional transport of an exact solar-day fact from two locally selected Home Assistant Sun timestamp history sources. Queries and results are bounded and tied to the home, timezone, source binding, configuration epoch and current connection; no location or raw history is exported.
+- Keep solar history disabled unless explicitly configured in the existing optional local policy. Existing saved options remain compatible, no Home Assistant or Supervisor permissions or host ports are added, and household decisions stay on the central server.
+
 ## 0.1.5
 
 - Add an optional read-only support consent interface through Home Assistant Ingress. Only explicitly allowed local Home Assistant users can approve an exact pending incident request; grants expire within 30 minutes and can be revoked locally.
