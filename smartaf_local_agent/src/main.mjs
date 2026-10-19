@@ -1,4 +1,5 @@
 import { loadConfig } from "./config.mjs";
+import { assertCommandReady } from "./command-guard.mjs";
 import { DurableAgentState } from "./durable-state.mjs";
 import { HomeAssistantWebSocketClient } from "./ha-client.mjs";
 import { acknowledgement, eventFromHomeAssistant, serviceCallFromCommand, stateSnapshotFromHomeAssistant, validateServerCommand } from "./protocol.mjs";
@@ -157,16 +158,17 @@ async function executeCommand(rawCommand) {
     }
     return;
   }
-  if (!ha?.connected) return;
+  const client = ha;
   const started = performance.now();
   await state.recordCommandResult({ command_id: command.command_id, status: "executing", occurred_at: new Date().toISOString() });
   try {
-    await ha.callService(serviceCallFromCommand(command));
+    await assertCommandReady(command, { client, isCurrentClient: (candidate) => ha === candidate });
+    await client.callService(serviceCallFromCommand(command));
     const result = { command_id: command.command_id, status: "succeeded", occurred_at: new Date().toISOString(), latency_ms: Number((performance.now() - started).toFixed(3)) };
     await state.recordCommandResult(result);
     await acknowledgeRecorded(command, result);
   } catch (error) {
-    const result = { command_id: command.command_id, status: "failed", occurred_at: new Date().toISOString(), error_code: error.code || "ha_call_failed", latency_ms: Number((performance.now() - started).toFixed(3)) };
+    const result = { command_id: command.command_id, status: error.safetyRejection ? (error.code === "command_expired" ? "expired" : "rejected") : "failed", occurred_at: new Date().toISOString(), error_code: error.code || "ha_call_failed", latency_ms: Number((performance.now() - started).toFixed(3)) };
     await state.recordCommandResult(result);
     await acknowledgeRecorded(command, result);
   }
@@ -195,7 +197,7 @@ async function heartbeat() {
         agent_version: config.agentVersion,
         connection_state: ha?.connected ? "online" : "ha_disconnected",
         buffered_events: await state.bufferedEvents(),
-        capabilities: ["state_events", "state_snapshots", "service_observations", "commands", "acknowledgements", "durable_buffer", "no_automation_logic"]
+        capabilities: ["state_events", "state_snapshots", "service_observations", "commands", "acknowledgements", "durable_buffer", "no_automation_logic", "command_guards_v1"]
       });
       if (typeof response.server_instance_id === "string") {
         if (serverInstanceId && serverInstanceId !== response.server_instance_id && ha?.connected) await enqueueStateSnapshot(ha, "control_plane_restart");

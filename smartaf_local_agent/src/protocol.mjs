@@ -76,7 +76,21 @@ export function validateServerCommand(input, { homeId, agentId, allowedServices,
   const expiresAt = Date.parse(input.expires_at);
   if (!Number.isFinite(notBefore)) add("not_before", "is ongeldig");
   if (!Number.isFinite(expiresAt)) add("expires_at", "is ongeldig");
+  if (Number.isFinite(notBefore) && notBefore > now) add("not_before", "is nog niet bereikt");
   if (Number.isFinite(expiresAt) && expiresAt <= now) add("expires_at", "is verlopen");
+  if (Number.isFinite(notBefore) && Number.isFinite(expiresAt) && expiresAt <= notBefore) add("expires_at", "moet na not_before liggen");
+  if (input.guard !== undefined) {
+    const guard = input.guard;
+    if (!isObject(guard)) add("guard", "moet een object zijn");
+    else {
+      if (guard.type !== "state_equals") add("guard.type", "is niet toegestaan");
+      if (typeof guard.entity_id !== "string" || !ENTITY_ID_PATTERN.test(guard.entity_id)) add("guard.entity_id", "is ongeldig");
+      if (typeof guard.state !== "string" || !guard.state.length || guard.state.length > 128 || ["unknown", "unavailable"].includes(guard.state)) add("guard.state", "is ongeldig");
+      if (typeof guard.source_event_id !== "string" || !/^evt_[a-zA-Z0-9_-]{6,96}$/.test(guard.source_event_id)) add("guard.source_event_id", "is ongeldig");
+      const observedAt = Date.parse(guard.observed_at);
+      if (!Number.isFinite(observedAt) || observedAt > notBefore) add("guard.observed_at", "is ongeldig");
+    }
+  }
   if (errors.length) throw Object.assign(new Error("Servercommand is geweigerd"), { code: "invalid_command", details: errors });
   return { ...input, not_before_timestamp: notBefore, expires_at_timestamp: expiresAt };
 }
