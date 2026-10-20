@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Add an optional, disabled-by-default observer stream for schema-2 shadow profiles. Keep queued observations until the central observer has durably committed its own receipt; ordinary transport acknowledgements cannot discard them.
+- Require a server-bound fresh snapshot after real continuity loss. Fence local observation and storage failures immediately, reject stale connection callbacks, bound snapshot capture and avoid repeated disconnect requests while offline.
+- Add optional local display names to the support consent interface. Names stay local and cannot expand approved actions, entities, account identity or expiry; exact technical scope remains available.
+- Keep household decisions central and physical command permissions unchanged. The new observer option is optional for existing saved configurations; no Supervisor access, host ports or additional Home Assistant permissions are added.
+
 ## 0.1.6
 
 - Keep read-only support sessions open during ordinary automation telemetry backlogs and observer snapshot refreshes. Distinguish the server process from its observer resynchronization token; real connection loss, process replacement, expiry and local revocation still invalidate support.
