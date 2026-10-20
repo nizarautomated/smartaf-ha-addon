@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+- Add optional private presence categories for explicitly selected person entities. Local mappings keep zone names, SSIDs and coordinates out of telemetry; the existing ordinary state filter remains unchanged and unlisted zones remain unknown.
+- Bind category observations to the home, person, configuration epoch and original observation times. Restored or invalid observations cannot supply a trusted category. Household decisions remain on the central server.
+- Keep saved options and policies without this opt-in compatible. No new Home Assistant or Supervisor permissions, support access, runtime commands, host ports or local automation timers are added. Enabling the optional policy requires a compatible central server and matching shadow profile first.
+
 ## 0.1.7
 
 - Add an optional, disabled-by-default observer stream for schema-2 shadow profiles. Keep queued observations until the central observer has durably committed its own receipt; ordinary transport acknowledgements cannot discard them.
