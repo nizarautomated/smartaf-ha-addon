@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { validSolarHistoryPolicy, selectedSolarSnapshot } from './solar-transport.mjs';
+import { validPresenceCategoriesPolicy, selectedPresenceFact } from './presence-transport.mjs';
 
 const HOME = /^home_[a-z0-9][a-z0-9_]{2,47}$/;
 const OPERATOR = /^operator_[a-z0-9][a-z0-9_]{2,63}$/;
@@ -103,7 +104,7 @@ export function compileAccessPolicy(input, { homeId } = {}) {
       }
     }
   }
-  keys(input.telemetry, ["entities", "state_values", "solar_history"]);
+  keys(input.telemetry, ["entities", "state_values", "solar_history", "presence_categories"]);
   if (input.telemetry.solar_history !== undefined && !validSolarHistoryPolicy(input.telemetry.solar_history)) deny('invalid_solar_history_policy');
   entities(input.telemetry.entities);
   if (input.telemetry.state_values !== undefined) {
@@ -114,6 +115,7 @@ export function compileAccessPolicy(input, { homeId } = {}) {
       if (!allowed.length) deny("invalid_access_policy");
     }
   }
+  if (input.telemetry.presence_categories !== undefined && !validPresenceCategoriesPolicy(input.telemetry.presence_categories, input.telemetry)) deny('invalid_presence_categories_policy');
   const support = input.support ?? { enabled: false, operators: [], entities: [], actions: [] };
   keys(support, ["enabled", "operators", "entities", "actions"]);
   if (typeof support.enabled !== "boolean") deny("invalid_access_policy");
@@ -179,16 +181,23 @@ export function selectTelemetry(event, { policy, homeId } = {}) {
     ? value : policy.telemetry.state_values[entityId].includes(value) ? value : 'unknown';
   const envelope = Object.fromEntries(["protocol_version", "home_id", "agent_id", "event_id", "sequence", "occurred_at", "type"].map((key) => [key, event[key]]));
   const origin = ["manual", "automation", "unknown"].includes(event.origin) ? event.origin : "unknown";
+  const metadata = (entityId, value, supplied) => {
+    const safe = safeMetadata(supplied, entityId);
+    const fact = selectedPresenceFact({ configuration: policy.telemetry.presence_categories, entityId, homeId,
+      value, metadata: safe.metadata, occurredAt: event.occurred_at });
+    if (fact) safe.metadata.presence_category = fact;
+    return safe;
+  };
   if (event.type === "state_changed") {
     if (!selected.has(event.entity_id)) return null;
     if (typeof event.new_state !== "string" || event.new_state.length > 128 || !(event.old_state === null || (typeof event.old_state === "string" && event.old_state.length <= 128))) deny("invalid_telemetry");
-    return { ...envelope, entity_id: event.entity_id, old_state: stateValue(event.entity_id,event.old_state), new_state: stateValue(event.entity_id,event.new_state), origin, ...safeMetadata(event.metadata, event.entity_id) };
+    return { ...envelope, entity_id: event.entity_id, old_state: stateValue(event.entity_id,event.old_state), new_state: stateValue(event.entity_id,event.new_state), origin, ...metadata(event.entity_id, event.new_state, event.metadata) };
   }
   if (event.type === "state_snapshot") {
     if (!Array.isArray(event.payload?.states) || event.payload.states.length > 5_000) deny("invalid_telemetry");
     const states = event.payload.states.filter((item) => selected.has(item?.entity_id)).map((item) => {
       if (typeof item.state !== "string" || item.state.length > 128) deny("invalid_telemetry");
-      return { entity_id: item.entity_id, state: stateValue(item.entity_id,item.state), ...safeMetadata(item.metadata, item.entity_id) };
+      return { entity_id: item.entity_id, state: stateValue(item.entity_id,item.state), ...metadata(item.entity_id, item.state, item.metadata) };
     });
     if (new Set(states.map((item) => item.entity_id)).size !== states.length) deny("invalid_telemetry");
     return { ...envelope, payload: { states, ...selectedSolarSnapshot(event.payload, {
