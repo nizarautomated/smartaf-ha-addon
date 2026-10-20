@@ -85,6 +85,7 @@ export function loadConfig(env = process.env) {
     haToken,
     dataDir: env.SMARTAF_DATA_DIR || "/data",
     agentVersion: env.SMARTAF_AGENT_VERSION || "0.1.0",
+    observerStreamEnabled: enabled(env.SMARTAF_OBSERVER_STREAM_V1),
     allowedServices,
     accessPolicy: compileAccessPolicy(env.SMARTAF_ACCESS_POLICY_JSON?.trim() ? JSON.parse(env.SMARTAF_ACCESS_POLICY_JSON) : null, {homeId}),
     supportConsent: loadSupportConsentConfig(env.SMARTAF_SUPPORT_CONSENT_JSON, { secureTransport: controlPlaneUrl.protocol === 'https:' }),

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 function initial() {
@@ -34,16 +34,20 @@ export class DurableAgentState {
     return this;
   }
 
-  async #persist() {
+  async #persist(value = this.state) {
     const temporary = `${this.path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(this.state)}\n`, { mode: 0o600, flag: "wx" });
+    const file=await open(temporary,'wx',0o600);
+    try {await file.writeFile(`${JSON.stringify(value)}\n`);await file.sync();} finally {await file.close();}
     await rename(temporary, this.path);
+    if(process.platform!=='win32'){const directory=await open(this.dataDir,'r');try{await directory.sync();}finally{await directory.close();}}
   }
 
   #mutate(operation) {
     const run = this.lock.catch(() => {}).then(async () => {
-      const result = await operation(this.state);
-      await this.#persist();
+      const next = structuredClone(this.state);
+      const result = await operation(next);
+      await this.#persist(next);
+      this.state = next;
       return result;
     });
     this.lock = run;
@@ -65,20 +69,24 @@ export class DurableAgentState {
     });
   }
 
-  enqueueSequencedEvents(events) {
+  enqueueSequencedEvents(events,{isCurrent=()=>true}={}) {
     if (!Array.isArray(events)) throw new Error("Events moeten een lijst zijn");
     return this.#mutate((state) => {
+      if(isCurrent()!==true)throw Object.assign(new Error("HA observation connection changed"),{code:"ha_disconnected"});
       if (state.events.length + events.length > this.eventQueueLimit) {
         throw Object.assign(new Error("Eventbuffer is vol"), { code: "event_buffer_full" });
       }
-      const sequenced = events.map((event) => ({ ...event, sequence: ++state.sequence }));
+      const sequenced = events.map((event) => ({ ...event, sequence: ++state.sequence,
+        ...(state.observer?.session_id && !state.observer.needs_reset ? {
+          observer_sequence:++state.observer.produced_sequence,observer_epoch:state.observer.session_id
+        }: {}) }));
       state.events.push(...sequenced);
       return structuredClone(sequenced);
     });
   }
 
-  async enqueueSequencedEvent(event) {
-    return (await this.enqueueSequencedEvents([event]))[0];
+  async enqueueSequencedEvent(event,options) {
+    return (await this.enqueueSequencedEvents([event],options))[0];
   }
 
   async firstEvent() {
@@ -98,6 +106,12 @@ export class DurableAgentState {
     await this.lock.catch(() => {});
     return this.state.events.length;
   }
+
+  // Internal opt-in protocol adapter. Shares the exact event queue transaction
+  // rather than maintaining a second, non-atomic queue beside normal events.
+  observerTransaction(operation) { return this.#mutate(operation); }
+  async observerState() { await this.lock.catch(()=>{}); return structuredClone(this.state); }
+  observerRead(operation) { const run=this.lock.catch(()=>{}).then(()=>operation(structuredClone(this.state)));this.lock=run;return run; }
 
   async commandResult(commandId) {
     await this.lock.catch(() => {});

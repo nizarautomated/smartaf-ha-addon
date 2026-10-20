@@ -25,7 +25,7 @@ export async function captureStateSnapshot({ client, homeId, agentId, policy, co
   assertCurrent();
   // Read current states after the bounded history request: waiting for history
   // must not relabel an older full snapshot as current.
-  const states = await client.getStates();
+  const states = await client.getStates({timeoutMs:5000});
   assertCurrent();
   if (!Array.isArray(states)) throw Object.assign(new Error('Invalid HA states'), { code: 'ha_invalid_states' });
   const capturedAt = new Date(clock()).toISOString();

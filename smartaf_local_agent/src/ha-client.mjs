@@ -104,8 +104,8 @@ export class HomeAssistantWebSocketClient {
     return this.#request({ type: "call_service", domain, service, service_data, return_response: false });
   }
 
-  getStates() {
-    return this.#request({ type: "get_states" });
+  getStates(options = {}) {
+    return this.#request({ type: "get_states" }, options);
   }
 
   async getSolarHistory(configuration) {

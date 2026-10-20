@@ -42,6 +42,11 @@ export class SmartAFServerClient {
     return this.#request("/v1/events", { method: "POST", body: event });
   }
 
+  observerExchange(input){
+    if(Buffer.byteLength(JSON.stringify(input))>262144)throw Object.assign(Error('observer_request_too_large'),{code:'observer_request_too_large'});
+    return this.#request(`/v1/agents/${this.homeId}/observer/exchange`,{method:'POST',body:input,timeoutMs:10000,maximumBytes:65536,rejectRedirects:true});
+  }
+
   heartbeat(input) {
     return this.#request(`/v1/agents/${this.homeId}/heartbeat`, { method: "POST", body: input });
   }

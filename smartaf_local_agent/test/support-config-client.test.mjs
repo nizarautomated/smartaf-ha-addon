@@ -6,6 +6,14 @@ import { SmartAFServerClient } from '../src/server-client.mjs';
 
 const env={SMARTAF_HOME_ID:'home_alpha',SMARTAF_AGENT_ID:'agent_alpha',SMARTAF_AGENT_TOKEN:'a'.repeat(32),SMARTAF_CONTROL_PLANE_URL:'https://server.example.test',SUPERVISOR_TOKEN:'synthetic'};
 const option={enabled:true,allowed_origins:['https://home.example.test'],allowed_user_ids:['a'.repeat(32)]};
+test('optional local labels preserve old settings and invalid labels disable only support',()=>{
+  const prior=loadSupportConsentConfig(JSON.stringify(option));
+  assert.equal(Object.hasOwn(prior,'display'),false);
+  const display={home_name:'Woning aan de tuin',entities:{'light.kitchen':'Keukenlamp'}};
+  assert.deepEqual(loadSupportConsentConfig(JSON.stringify({...option,display})),{...prior,display});
+  const invalid=[null,[],{operator_name:'Beheerder'},{home_name:''},{home_name:' x'},{home_name:'x\n'},{home_name:'x\u202ey'},{home_name:'x'.repeat(97)},{entities:{'bad/id':'Lamp'}},{entities:{'light.test':''}},{entities:{'light.test':true}},{entities:Object.fromEntries(Array.from({length:257},(_,i)=>['light.item_'+i,'Lamp']))}];
+  for(const display of invalid){const config=loadConfig({...env,SMARTAF_SUPPORT_CONSENT_JSON:JSON.stringify({...option,display})});assert.equal(config.supportConsent.enabled,false);assert.equal(config.supportConsent.errorCode,'support_configuration_invalid');assert.equal(config.allowedServices.has('light.turn_on'),true);}
+});
 test('absent, disabled or malformed optional consent config preserves existing agent behavior',()=>{
   assert.deepEqual(loadConfig(env).supportConsent,{enabled:false});
   assert.deepEqual(loadSupportConsentConfig('{"enabled":false}'),{enabled:false});

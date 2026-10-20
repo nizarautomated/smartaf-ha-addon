@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SupportConsentController, CONSENT_LIMITS } from '../src/support-consent.mjs';
+import { SupportConsentController, CONSENT_LIMITS, supportGrantDigest } from '../src/support-consent.mjs';
 import { SUPPORT_READ_ACTIONS } from '../src/access-policy.mjs';
 
 const epoch = Date.parse('2026-10-19T18:00:00Z');
@@ -11,9 +11,9 @@ const iso = value => new Date(value).toISOString();
 function policy() {
   return { schema_version: 1, home_id: 'home_fixture', revision: 7, enabled: true, runtime: { permissions: [] }, telemetry: { entities: [] }, support: { enabled: true, operators: ['operator_fixture'], actions: [...SUPPORT_READ_ACTIONS], entities: ['light.kitchen', 'binary_sensor.motion'] } };
 }
-function fixture({ input = policy(), users = [user], origins = [origin], online = true } = {}) {
+function fixture({ input = policy(), users = [user], origins = [origin], online = true, display } = {}) {
   let now = epoch;
-  const controller = new SupportConsentController({ homeId: 'home_fixture', policy: input, allowedOrigins: origins, allowedConsentUsers: users, clock: () => now });
+  const controller = new SupportConsentController({ homeId: 'home_fixture', policy: input, allowedOrigins: origins, allowedConsentUsers: users, display, clock: () => now });
   if (online) controller.setTransportState({ haConnected: true, serverConnected: true, bufferedEvents: 0 });
   const base = { remoteAddress: '172.30.32.2', headers: { host: 'home.example.test', 'x-remote-user-id': user, 'x-hass-source': 'core.ingress', 'x-ingress-path': ingressPath } };
   const request = (path, { method = 'GET', headers = {}, body, ...rest } = {}) => controller.handle({ ...base, method, path, headers: { ...base.headers, ...headers }, ...(body === undefined ? {} : { rawBody: JSON.stringify(body) }), ...rest });
@@ -35,6 +35,30 @@ function fixture({ input = policy(), users = [user], origins = [origin], online 
   return { controller, request, page, post, prepare, approve, diagnose, scope, proposal, receive, advance: value => { now += value; }, setTime: value => { now = value; } };
 }
 const errorCode = result => JSON.parse(result.body).error;
+
+test('local display names cannot expand scope, identify an operator, or enter the support transport', () => {
+  const display = { home_name: 'Mijn woning', entities: { 'light.kitchen': 'Keukenlamp', 'sensor.private': 'Privénaam' } };
+  const f = fixture({ display }), session = f.page();
+  display.entities['light.kitchen'] = 'Later gewijzigd';
+  const state = JSON.parse(f.request('/api/state', { headers: { cookie: session.cookie } }).body);
+  assert.deepEqual(state.display, { home_name: 'Mijn woning', entities: { 'light.kitchen': 'Keukenlamp' } });
+  assert.equal(f.request('/api/state').status, 401);
+  const grant = f.proposal(), digest = supportGrantDigest(grant); f.receive(grant);
+  const prepared = f.post(session, '/api/prepare', { grant_id: grant.grant_id });
+  const draft = JSON.parse(prepared.body);
+  assert.equal(Object.hasOwn(draft, 'display'), false);
+  assert.equal(f.post(session, '/api/approve', { draft_id: draft.draft_id, confirm: true, display: { entities: { 'sensor.private': 'Keukenlamp' } } }).status, 400);
+  const approved = f.approve(session, draft);
+  assert.equal(supportGrantDigest(approved), digest);
+  const report = f.diagnose(approved), transport = f.controller.transportSnapshot();
+  for (const value of [prepared.body, JSON.stringify(approved), JSON.stringify(report), JSON.stringify(transport)]) {
+    assert.equal(value.includes('Keukenlamp'), false); assert.equal(value.includes('Privénaam'), false); assert.equal(value.includes('Mijn woning'), false);
+  }
+  assert.throws(() => f.diagnose(approved, { entities: ['sensor.private'] }), { code: 'support_scope_denied' });
+  assert.equal(f.post(session, '/api/revoke', { grant_id: approved.grant_id }).status, 200);
+  assert.throws(() => f.diagnose(approved), { code: 'support_grant_absent' });
+  assert.throws(() => fixture({ display: { operator_name: 'Verzonnen beheerder' } }), TypeError);
+});
 
 test('local consent is disabled by default and cannot configure policy or connect transport over HTTP', () => {
   for (const options of [{ input: null }, { input: { ...policy(), support: { ...policy().support, enabled: false } } }, { online: false }]) {

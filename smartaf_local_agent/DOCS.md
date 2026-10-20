@@ -27,6 +27,8 @@ Wijzig de standaardidentiteit pas nadat SmartAF de productie-identiteit heeft ui
 
 Na opslaan moet de app opnieuw worden gestart. Een gezonde log toont `ha_connected`, een gebufferde statesnapshot en geslaagde heartbeats zonder tokens of Home Assistant-attributen.
 
+`observer_stream_v1` is optioneel en staat standaard uit. Schakel dit uitsluitend in nadat de centrale server de bijbehorende observatiestream ondersteunt en de woning een beoordeeld klantprofiel in schaduwmodus heeft. Deze stream wacht op een afzonderlijk centraal ontvangstbewijs voordat een lokale waarneming uit de wachtrij verdwijnt. Korte achterstand bewaart de lopende observatietoestand; een echte onderbreking of opslagfout vraagt een nieuwe snapshot. Dit verleent geen extra apparaat- of supportrechten en activeert geen huishoudautomation.
+
 ## Beperkte toegang en tijdelijke ondersteuning
 
 `access_policy_json` is optioneel voor bestaande installaties. Een expliciete policy begrenst de gedeelde entiteiten en toegestane opdrachten. Nieuwe klanten krijgen een beoordeelde policy met concrete entiteiten en services. Een lijst met alleen servicenamen is daarvoor onvoldoende. Zonder runtimepermissions kan SmartAF via deze agent geen apparaten bedienen.
@@ -34,6 +36,8 @@ Na opslaan moet de app opnieuw worden gestart. Een gezonde log toont `ha_connect
 `support_consent_json` is optioneel en standaard leeg. Leeg, uitgeschakeld of ongeldig betekent dat tijdelijke ondersteuning uit staat. Bestaande telemetry blijft daarbij werken. Ingeschakelde ondersteuning vereist ook een lokale access-policy die de operator, leesacties en entiteiten toestaat, plus een afzonderlijke incidentidentiteit op de server. De bestaande fleetleessleutel verleent geen incidentrechten.
 
 Het configuratieobject bevat `enabled`, eventueel `port` (standaard 8099), `allowed_origins` met de exacte HTTPS-oorsprong van jouw Home Assistant en `allowed_user_ids` met de lokale HA-gebruikers die mogen goedkeuren. Deze gebruikerslijst blijft lokaal; zij is geen centraal bewonersprofiel. Gebruik poort 8099 bij de vaste Ingress-instelling van deze app. Open geen hostpoort.
+
+Optioneel mag dit object ook `display` bevatten: `home_name` voor de woningnaam en `entities` als object met entiteit-ID's en herkenbare apparaatnamen. Deze namen blijven lokaal in de supportinterface; de exacte technische scope en eindtijd blijven controleerbaar. Ze verruimen nooit de toestemming. Bij teruggaan naar versie 0.1.6 moet dit optionele `display`-veld eerst worden verwijderd.
 
 Open de app via Home Assistant. Daar toont een supportaanvraag de woning, operator, incident, exacte leesacties, maximaal tien entiteiten en eindtijd. Controleer de aanvraag en keur hem alleen voor dat incident goed. Goedkeuring wijzigt geen apparaatinstellingen en verleent geen terminal-, Supervisor- of algemene HA-toegang. De maximale duur is dertig minuten. Via intrekken sluit je de lokale supportsessie en vervallen ook de andere supportgrants in die sessie.
 

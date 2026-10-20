@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { compileAccessPolicy, LocalSupportAccess, signLocalSupportApproval, SUPPORT_LIMITS } from './access-policy.mjs';
 import { renderSupportConsentPage } from './support-consent-ui.mjs';
+import { validateSupportDisplay } from './support-consent-config.mjs';
 
 export const CONSENT_LIMITS = Object.freeze({ bodyBytes: 8_192, sessions: 16, sessionMs: 10 * 60_000, draftMs: 60_000 });
 const USER = /^[a-f0-9]{32}$/;
@@ -50,11 +51,14 @@ export function verifyConsentIngress({ remoteAddress, headers = {} }, allowedOri
 
 export class SupportConsentController {
   #homeId; #policy; #clock; #lastNow; #clockFailed = false;
-  #origins; #users; #key = randomBytes(32); #access; #online = false;
+  #origins; #users; #display; #key = randomBytes(32); #access; #online = false;
   #sessions = new Map(); #grants = new Map(); #proposals = new Map(); #seenProposals = new Map(); #revoked = new Set(); #cookieName;
 
-  constructor({ homeId, policy = null, allowedOrigins = [], allowedConsentUsers = [], clock = Date.now } = {}) {
+  constructor({ homeId, policy = null, allowedOrigins = [], allowedConsentUsers = [], display, clock = Date.now } = {}) {
     this.#policy = compileAccessPolicy(policy, { homeId });
+    const labels = validateSupportDisplay(display);
+    // Even local names outside the support allowlist must not enter the UI.
+    this.#display = labels && { ...labels, entities: Object.fromEntries(Object.entries(labels.entities).filter(([entity]) => this.#policy?.support.entities.includes(entity))) };
     if (!Array.isArray(allowedOrigins) || !allowedOrigins.length || allowedOrigins.length > 8 || new Set(allowedOrigins).size !== allowedOrigins.length) throw new TypeError('Explicit local HTTPS origins required');
     this.#origins = allowedOrigins.map(value => {
       let parsed; try { parsed = new URL(value); } catch { throw new TypeError('Invalid consent origin'); }
@@ -197,7 +201,8 @@ export class SupportConsentController {
       maximum_minutes: SUPPORT_LIMITS.grantMs / 60_000, maximum_entities: SUPPORT_LIMITS.entities,
       server_time: iso(now), operators: [...(this.#policy?.support.operators ?? [])],
       actions: [...(this.#policy?.support.actions ?? [])], entities: [...(this.#policy?.support.entities ?? [])],
-      proposals: [...this.#proposals.values()].map(copy), grants: [...this.#grants.values()].map(copy)
+      proposals: [...this.#proposals.values()].map(copy), grants: [...this.#grants.values()].map(copy),
+      ...(this.#display === undefined ? {} : { display: copy(this.#display) })
     };
   }
   #requireEnabled() {

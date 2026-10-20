@@ -17,6 +17,12 @@ export SMARTAF_SUPPORT_CONSENT_JSON=""
 if bashio::config.has_value 'support_consent_json'; then
   export SMARTAF_SUPPORT_CONSENT_JSON="$(bashio::config 'support_consent_json')"
 fi
+export SMARTAF_OBSERVER_STREAM_V1=0
+if bashio::config.has_value 'observer_stream_v1'; then
+  if [[ "$(bashio::config 'observer_stream_v1')" == "true" ]]; then
+    export SMARTAF_OBSERVER_STREAM_V1=1
+  fi
+fi
 export SMARTAF_DATA_DIR=/data
 export SMARTAF_AGENT_VERSION="${SMARTAF_AGENT_VERSION:-0.0.0}"
 
